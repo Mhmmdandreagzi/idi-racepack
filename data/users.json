@@ -1,0 +1,22 @@
+[
+  {
+    "uid": "admin_01",
+    "email": "admin@racepack.com",
+    "password": "admin123",
+    "displayName": "Admin Utama",
+    "nama": "Admin Utama",
+    "role": "admin",
+    "isActive": true,
+    "aktif": true
+  },
+  {
+    "uid": "petugas_01",
+    "email": "petugas@racepack.com",
+    "password": "petugas123",
+    "displayName": "Petugas Meja 1",
+    "nama": "Petugas Meja 1",
+    "role": "petugas",
+    "isActive": true,
+    "aktif": true
+  }
+]

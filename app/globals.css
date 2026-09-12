@@ -1,26 +1,63 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #F3E8D2;
+  --foreground: #111111;
+
+  /* Style.md Tokens */
+  --color-cream: #F3E8D2;
+  --color-black: #111111;
+  --color-red: #D71920;
+  --color-green: #26734D;
+  --color-green-light: #5C9B78;
+  --color-gold: #D4B84C;
+  --color-neutral: #E6D8BE;
+  --color-border: #D8CDB8;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-cream: var(--color-cream);
+  --color-black: var(--color-black);
+  --color-red: var(--color-red);
+  --color-green: var(--color-green);
+  --color-green-light: var(--color-green-light);
+  --color-gold: var(--color-gold);
+  --color-neutral: var(--color-neutral);
+  --color-border: var(--color-border);
+
+  --font-display: var(--font-anton), Impact, sans-serif;
+  --font-body: var(--font-inter), sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #F3E8D2;
+  color: #111111;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Style.md Display Typography */
+.font-display,
+.font-athletic {
+  font-family: var(--font-anton), Impact, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+/* Custom Scrollbar styled for Cream theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #E6D8BE;
+}
+::-webkit-scrollbar-thumb {
+  background: #111111;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D71920;
 }

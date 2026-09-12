@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Karena sistem menggunakan autentikasi JSON hardcode internal (tanpa Firebase Auth),
+    // akses ke koleksi peserta, pengambilan, dan stats diizinkan langsung dari aplikasi.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
