@@ -104,11 +104,15 @@ async function main() {
       }
     }
 
-    // 1. Create database jika belum ada
+    // 1. Create database jika belum ada (abaikan jika di shared hosting database sudah ada / tanpa privilege CREATE DATABASE)
     console.log(`📁 Menyiapkan database \`${dbName}\`...`);
-    await connection.query(
-      `CREATE DATABASE IF NOT EXISTS \`${dbName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
-    );
+    try {
+      await connection.query(
+        `CREATE DATABASE IF NOT EXISTS \`${dbName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+      );
+    } catch (createDbErr) {
+      // Pada Hostinger cPanel / shared hosting, database biasanya sudah dibuat via panel
+    }
     await connection.changeUser({ database: dbName });
 
     // 2. Ensure schema & all columns exist

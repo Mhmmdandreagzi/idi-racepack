@@ -1,12 +1,6 @@
 -- Schema Database RUN IDI RUN (MySQL)
 -- Sumber Data Utama (Source of Truth) sesuai AGENTS.md
 
-CREATE DATABASE IF NOT EXISTS `idi_racepack` 
-DEFAULT CHARACTER SET utf8mb4 
-DEFAULT COLLATE utf8mb4_unicode_ci;
-
-USE `idi_racepack`;
-
 -- 1. Tabel Users (Admin & Petugas)
 CREATE TABLE IF NOT EXISTS `users` (
   `id` VARCHAR(64) NOT NULL,
