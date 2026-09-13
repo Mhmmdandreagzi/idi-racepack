@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
@@ -38,6 +39,14 @@ export default function Navbar() {
           {/* Brand Logo: RUN IDI RUN */}
           <div className="flex items-center space-x-3">
             <Link href="/" className="flex items-center space-x-3 group">
+              <Image
+                src="/image/logo/logo-idi.png"
+                alt="Logo IDI"
+                width={40}
+                height={40}
+                className="w-9 h-9 sm:w-10 sm:h-10 object-contain shrink-0 drop-shadow-sm group-hover:scale-105 transition-transform"
+                priority
+              />
               <div className="flex items-center tracking-tight leading-none">
                 <span className="font-display text-3xl sm:text-4xl font-normal text-[#111111]">
                   RUN
