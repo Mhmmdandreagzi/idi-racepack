@@ -30,8 +30,13 @@ export default function PesertaCard({ peserta, onSelect }: PesertaCardProps) {
         {/* Name and Details */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <h3 className="font-display text-xl sm:text-2xl font-normal text-[#111111] group-hover:text-[#D71920] transition-colors truncate">
-              {peserta.nama}
+            <h3 className="font-display text-xl sm:text-2xl font-normal text-[#111111] transition-colors truncate">
+              <span>{peserta.nama}</span>
+              {peserta.nama_bib && peserta.nama_bib.trim() ? (
+                <span className="text-[#D71920] font-bold ml-2 px-2 py-0.5 rounded-lg bg-[#D71920]/10 border border-[#D71920]/25 text-base sm:text-lg tracking-wide inline-block">
+                  ({peserta.nama_bib.trim()})
+                </span>
+              ) : null}
             </h3>
             {peserta.jenis_kelamin && (
               <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#E6D8BE] text-[#111111]">

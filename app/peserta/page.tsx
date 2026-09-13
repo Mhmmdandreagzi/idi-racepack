@@ -60,7 +60,6 @@ function PesertaContent() {
   };
 
   const handleTriggerSearch = () => {
-    if (!searchQuery.trim()) return;
     setDisplayLimit(30);
     executeSearch();
   };
@@ -97,17 +96,15 @@ function PesertaContent() {
               <span>Pengambilan Kolektif (Diwakilkan)</span>
             </button>
 
-            {hasSearched && (
-              <button
-                onClick={handleTriggerSearch}
-                disabled={isLoading}
-                className="flex items-center gap-1.5 text-xs font-bold text-[#111111] bg-[#E6D8BE] hover:bg-[#D8CDB8] px-3 py-1.5 sm:py-2 rounded-lg border border-[#D8CDB8] transition disabled:opacity-50"
-                title="Perbarui hasil pencarian dari Cloud Firestore"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-[#D71920]" : ""}`} />
-                <span className="hidden sm:inline">Refresh Data</span>
-              </button>
-            )}
+            <button
+              onClick={handleTriggerSearch}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 text-xs font-bold text-[#111111] bg-[#E6D8BE] hover:bg-[#D8CDB8] px-3 py-1.5 sm:py-2 rounded-lg border border-[#D8CDB8] transition disabled:opacity-50"
+              title="Perbarui hasil pencarian"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-[#D71920]" : ""}`} />
+              <span className="hidden sm:inline">Refresh Data</span>
+            </button>
           </div>
         </div>
 
@@ -145,36 +142,16 @@ function PesertaContent() {
         </div>
       )}
 
-      {/* Participant List / Initial Prompt State */}
+      {/* Participant List */}
       <section className="space-y-2.5">
-        {!hasSearched ? (
-          <div className="py-12 sm:py-16 text-center space-y-3 bg-[#FAF5EA] rounded-2xl border-2 border-dashed border-[#D8CDB8] p-6">
-            <div className="w-14 h-14 mx-auto rounded-2xl bg-[#E6D8BE] flex items-center justify-center text-[#111111] shadow-sm">
-              <Search className="w-7 h-7 text-[#D71920]" />
-            </div>
-            <h3 className="font-display text-2xl sm:text-3xl text-[#111111]">
-              PENCARIAN PESERTA RACEPACK
-            </h3>
-            <p className="text-xs sm:text-sm text-[#111111]/70 max-w-md mx-auto font-medium leading-relaxed">
-              Masukkan nama peserta, nomor BIB, NIK, atau nomor HP di kolom pencarian dan tentukan filter yang diinginkan, kemudian klik tombol <strong className="text-[#D71920] font-bold">Cari Peserta</strong>.
-            </p>
-            <div className="pt-3 flex flex-wrap items-center justify-center gap-2 text-[11px] text-[#111111]/70">
-              <span className="bg-[#E6D8BE] px-3 py-1 rounded-lg font-bold border border-[#D8CDB8]">
-                💡 Tekan Enter atau klik &ldquo;Cari Peserta&rdquo;
-              </span>
-              <span className="bg-[#E6D8BE] px-3 py-1 rounded-lg font-bold border border-[#D8CDB8]">
-                ⚡ Pure Cloud Firestore on-demand
-              </span>
-            </div>
-          </div>
-        ) : isLoading ? (
+        {isLoading && filteredPeserta.length === 0 ? (
           <div className="py-16 text-center space-y-3 bg-[#FAF5EA] rounded-2xl border border-[#D8CDB8]">
             <RefreshCw className="w-8 h-8 text-[#D71920] animate-spin mx-auto" />
             <p className="font-display text-2xl text-[#111111]">
-              MENGAMBIL DATA DARI FIRESTORE...
+              MEMUAT DATA PESERTA...
             </p>
             <p className="text-xs text-[#111111]/70">
-              Memproses kueri peserta ke server Cloud Firestore
+              Memproses data peserta dari database sistem
             </p>
           </div>
         ) : filteredPeserta.length === 0 ? (
@@ -182,7 +159,7 @@ function PesertaContent() {
             <SearchX className="w-12 h-12 text-[#111111]/30 mx-auto" />
             <h3 className="font-display text-2xl text-[#111111]">PESERTA TIDAK DITEMUKAN</h3>
             <p className="text-xs text-[#111111]/70 max-w-sm mx-auto font-medium">
-              Tidak ada peserta berstatus <strong>Belum Diambil</strong> yang cocok dengan kata kunci &quot;{searchQuery}&quot; atau filter yang dipilih di Cloud Firestore.
+              Tidak ada peserta berstatus <strong>Belum Diambil</strong> yang cocok dengan {searchQuery.trim() ? `kata kunci "${searchQuery}" atau ` : ""}filter yang dipilih.
             </p>
           </div>
         ) : (
@@ -202,7 +179,7 @@ function PesertaContent() {
               <div className="text-center pt-2 pb-6">
                 <button
                   onClick={() => setDisplayLimit((prev) => prev + 30)}
-                  className="px-6 py-2.5 rounded-lg bg-[#FAF5EA] hover:bg-[#E6D8BE] text-xs font-bold text-[#111111] border-2 border-[#111111] transition"
+                  className="px-6 py-2.5 rounded-lg bg-[#FAF5EA] hover:bg-[#E6D8BE] text-xs font-bold text-[#111111] border-2 border-[#111111] transition cursor-pointer"
                 >
                   Tampilkan lebih banyak ({filteredPeserta.length - displayLimit} data lagi)
                 </button>

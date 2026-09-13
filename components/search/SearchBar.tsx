@@ -27,11 +27,8 @@ export default function SearchBar({
     inputRef.current?.focus();
   };
 
-  const isEmpty = !value.trim();
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isEmpty) return;
     onSearch();
   };
 
@@ -69,9 +66,9 @@ export default function SearchBar({
         {/* Dedicated Cari Peserta Button */}
         <button
           type="submit"
-          disabled={isLoading || isEmpty}
+          disabled={isLoading}
           className="shrink-0 flex items-center justify-center gap-2 px-6 py-3 sm:py-3.5 bg-[#D71920] hover:bg-[#b5141a] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm sm:text-base transition shadow-sm cursor-pointer"
-          title={isEmpty ? "Ketik kata kunci pencarian terlebih dahulu" : "Cari data peserta ke Firestore"}
+          title="Cari data peserta"
         >
           {isLoading ? (
             <>
@@ -93,25 +90,16 @@ export default function SearchBar({
           {isLoading ? (
             <span className="inline-flex items-center text-[#26734D] font-bold">
               <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5 text-[#26734D]" />
-              Mengambil data dari Cloud Firestore...
-            </span>
-          ) : hasSearched ? (
-            <span>
-              Hasil pencarian: Menemukan{" "}
-              <strong className="text-[#111111] font-bold">{filteredCount}</strong> peserta di Firestore
-            </span>
-          ) : isEmpty ? (
-            <span className="text-[#111111]/70 italic">
-              Ketik nama, nomor BIB, NIK, atau nomor HP peserta untuk mulai mencari...
+              Memuat data peserta...
             </span>
           ) : (
-            <span className="text-[#111111]/80">
-              Klik <strong>Cari Peserta</strong> atau tekan Enter untuk mengambil data
+            <span>
+              Menampilkan <strong className="text-[#111111] font-bold">{filteredCount}</strong> peserta
             </span>
           )}
         </div>
-        <span className="text-[11px] text-[#111111]/60 uppercase font-bold tracking-wider hidden sm:inline">
-          Cloud Firestore • Khusus Belum Diambil
+        <span className="text-[11px] text-[#26734D] uppercase font-bold tracking-wider hidden sm:inline">
+          Khusus Belum Diambil
         </span>
       </div>
     </form>

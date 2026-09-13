@@ -8,7 +8,7 @@ import {
   ProxyPickupData,
   CollectivePickupResult,
 } from "@/lib/services/pickupService";
-import { queryPesertaFromFirestore } from "@/lib/services/pesertaQueryService";
+import { queryPeserta } from "@/lib/services/pesertaQueryService";
 import {
   X,
   Users,
@@ -23,7 +23,14 @@ import {
   CreditCard,
   User,
   Shirt,
+  Camera,
+  Upload,
+  ExternalLink,
+  FileText,
 } from "lucide-react";
+import DocumentCapture from "@/components/documents/DocumentCapture";
+import { uploadPesertaDocument, uploadPesertaDocuments } from "@/lib/services/documentService";
+import { useToast } from "@/context/ToastContext";
 
 interface CollectivePickupModalProps {
   onClose: () => void;
@@ -35,12 +42,17 @@ export default function CollectivePickupModal({
   onSuccess,
 }: CollectivePickupModalProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
 
   // Form states
   const [namaPengambil, setNamaPengambil] = useState("");
   const [nikPengambil, setNikPengambil] = useState("");
   const [noHpPengambil, setNoHpPengambil] = useState("");
   const [alamatPengambil, setAlamatPengambil] = useState("");
+
+  // Document states
+  const [collectiveSuratKuasaFiles, setCollectiveSuratKuasaFiles] = useState<File[]>([]);
+  const [participantBuktiFiles, setParticipantBuktiFiles] = useState<{ [pesertaId: string]: File }>({});
 
   // Selected participants list
   const [selectedList, setSelectedList] = useState<Peserta[]>([]);
@@ -50,36 +62,33 @@ export default function CollectivePickupModal({
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<Peserta[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
 
   // Submit states
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
 
   // Handle participant lookup
   const handleSearchPeserta = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const query = searchModalQuery.trim();
-    if (!query) {
-      setSearchError("Harap masukkan nama, nomor BIB, NIK, atau no HP peserta.");
-      return;
-    }
 
     try {
       setIsSearching(true);
-      setSearchError(null);
       setHasSearched(true);
 
-      const data = await queryPesertaFromFirestore({
+      const data = await queryPeserta({
         searchQuery: query,
         filters: { status: "belum", kategori: "all", sumber: "all" },
       });
 
       // Filter out those already selected or already taken
-      setSearchResults(data.filter((p) => !p.status_pengambilan));
+      const available = data.filter((p) => !p.status_pengambilan);
+      setSearchResults(available.slice(0, 50));
+      if (available.length === 0) {
+        toast.info("Tidak ada peserta belum diambil yang sesuai kata kunci.");
+      }
     } catch (err: any) {
       console.error("Lookup error:", err);
-      setSearchError(err.message || "Gagal mencari data peserta.");
+      toast.error(err.message || "Gagal mencari data peserta.");
       setSearchResults([]);
     } finally {
       setIsSearching(false);
@@ -90,12 +99,33 @@ export default function CollectivePickupModal({
   const handleAddPeserta = (peserta: Peserta) => {
     if (selectedList.some((p) => p.id === peserta.id)) return;
     setSelectedList((prev) => [...prev, peserta]);
-    setFormError(null);
+    toast.success(`Peserta "${peserta.nama}" berhasil ditambahkan.`);
   };
 
   // Remove participant from queue
   const handleRemovePeserta = (id: string) => {
     setSelectedList((prev) => prev.filter((p) => p.id !== id));
+    setParticipantBuktiFiles((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+  };
+
+  const handleSetBukti = (pesertaId: string, file: File) => {
+    setParticipantBuktiFiles((prev) => ({
+      ...prev,
+      [pesertaId]: file,
+    }));
+    toast.info(`Bukti bayar untuk peserta siap dilampirkan.`);
+  };
+
+  const handleRemoveBukti = (pesertaId: string) => {
+    setParticipantBuktiFiles((prev) => {
+      const copy = { ...prev };
+      delete copy[pesertaId];
+      return copy;
+    });
   };
 
   // Submit collective pickup
@@ -103,32 +133,52 @@ export default function CollectivePickupModal({
     if (isSubmitting) return;
 
     if (!user) {
-      setFormError("Anda harus login untuk memproses serah terima racepack.");
+      toast.error("Anda harus login untuk memproses serah terima racepack.");
       return;
     }
 
     if (!namaPengambil.trim()) {
-      setFormError("Nama perwakilan / yang mengambilkan wajib diisi.");
+      toast.error("Nama perwakilan / yang mengambilkan wajib diisi.");
       return;
     }
 
     if (!noHpPengambil.trim()) {
-      setFormError("Nomor telepon / WhatsApp perwakilan wajib diisi.");
+      toast.error("Nomor telepon / WhatsApp perwakilan wajib diisi.");
       return;
     }
 
     if (!alamatPengambil.trim()) {
-      setFormError("Alamat perwakilan wajib diisi.");
+      toast.error("Alamat perwakilan wajib diisi.");
       return;
     }
 
     if (selectedList.length === 0) {
-      setFormError("Pilih minimal 1 peserta untuk diambilkan racepacknya.");
+      toast.error("Pilih minimal 1 peserta untuk diambilkan racepacknya.");
+      return;
+    }
+
+    // Validation: Surat Kuasa is required
+    const hasCollectiveKuasa = collectiveSuratKuasaFiles.length > 0;
+    if (!hasCollectiveKuasa) {
+      const missingKuasa = selectedList.filter((p) => !p.surat_kuasa_path);
+      if (missingKuasa.length > 0) {
+        toast.error("Harap ambil foto atau unggah Surat Kuasa Kolektif perwakilan terlebih dahulu (bisa banyak foto).");
+        return;
+      }
+    }
+
+    // Validation: Bukti Bayar is required for each participant
+    const missingBukti = selectedList.filter(
+      (p) => !p.bukti_bayar_path && !participantBuktiFiles[p.id]
+    );
+    if (missingBukti.length > 0) {
+      toast.error(
+        `Harap ambil foto atau unggah Bukti Bayar untuk peserta: ${missingBukti.map((p) => p.nama).join(", ")}`
+      );
       return;
     }
 
     setIsSubmitting(true);
-    setFormError(null);
 
     const proxyData: ProxyPickupData = {
       nama: namaPengambil.trim(),
@@ -138,11 +188,31 @@ export default function CollectivePickupModal({
     };
 
     try {
+      // 1. Upload collective surat kuasa for all participants if provided
+      if (collectiveSuratKuasaFiles.length > 0) {
+        await uploadPesertaDocuments(
+          selectedList.map((p) => p.id),
+          "surat_kuasa",
+          collectiveSuratKuasaFiles
+        );
+      }
+
+      // 2. Upload individual bukti bayar files
+      for (const p of selectedList) {
+        const file = participantBuktiFiles[p.id];
+        if (file) {
+          await uploadPesertaDocument(p.id, "bukti_bayar", file);
+        }
+      }
+
+      // 3. Confirm collective pickup in MySQL atomic transaction
       const result = await confirmCollectivePickup(selectedList, proxyData, user);
+      toast.success(`Berhasil! ${selectedList.length} racepack telah diserahkan.`);
       onSuccess(result);
     } catch (err: any) {
       console.error("Collective pickup error:", err);
-      setFormError(err.message || "Gagal memproses pengambilan kolektif.");
+      toast.error(err.message || "Gagal memproses pengambilan kolektif.");
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -180,13 +250,6 @@ export default function CollectivePickupModal({
 
         {/* Modal Scrollable Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 bg-[#FAF5EA]">
-          {/* Error Banner */}
-          {formError && (
-            <div className="p-3.5 rounded-xl bg-[#FAF5EA] border-2 border-[#D71920] text-[#D71920] text-xs font-bold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{formError}</span>
-            </div>
-          )}
 
           {/* Section 1: Data Pengambil */}
           <div className="bg-[#F3E8D2] border border-[#D8CDB8] rounded-xl p-4 space-y-3">
@@ -270,6 +333,20 @@ export default function CollectivePickupModal({
                 </div>
               </div>
             </div>
+
+            {/* Surat Kuasa Kolektif Section */}
+            <div className="pt-2 border-t border-[#D8CDB8]">
+              <DocumentCapture
+                label="Surat Kuasa Perwakilan Kolektif"
+                category="surat_kuasa"
+                allowMultiple={true}
+                selectedFiles={collectiveSuratKuasaFiles}
+                onFilesChange={setCollectiveSuratKuasaFiles}
+                required={true}
+                disabled={isSubmitting}
+                helperText="Wajib: Bisa ambil banyak foto (halaman surat kuasa, KTP pengambil/pemberi kuasa) atau pilih berkas PDF/gambar."
+              />
+            </div>
           </div>
 
           {/* Section 2: Cari & Tambah Peserta */}
@@ -305,10 +382,6 @@ export default function CollectivePickupModal({
               </button>
             </form>
 
-            {/* Search error */}
-            {searchError && (
-              <p className="text-[11px] text-[#D71920] font-bold">{searchError}</p>
-            )}
 
             {/* Search Results Dropdown / Preview */}
             {hasSearched && (
@@ -333,7 +406,12 @@ export default function CollectivePickupModal({
                           <div className="min-w-0 flex-1 pr-2">
                             <div className="flex items-center gap-2">
                               <span className="font-display text-base text-[#111111] truncate">
-                                {p.nama}
+                                <span>{p.nama}</span>
+                                {p.nama_bib && p.nama_bib.trim() ? (
+                                  <span className="text-[#D71920] font-bold ml-1.5 px-1.5 py-0.5 rounded bg-[#D71920]/10 text-xs">
+                                    ({p.nama_bib.trim()})
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="px-1.5 py-0.5 rounded bg-[#111111] text-[#D4B84C] text-[10px] font-mono font-bold shrink-0">
                                 BIB: {p.bib || "NO BIB"}
@@ -410,7 +488,14 @@ export default function CollectivePickupModal({
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm text-[#111111]">{p.nama}</span>
+                          <span className="font-bold text-sm text-[#111111]">
+                            <span>{p.nama}</span>
+                            {p.nama_bib && p.nama_bib.trim() ? (
+                              <span className="text-[#D71920] font-bold ml-1.5 px-1.5 py-0.5 rounded bg-[#D71920]/10 text-xs">
+                                ({p.nama_bib.trim()})
+                              </span>
+                            ) : null}
+                          </span>
                           <span className="px-1.5 py-0.5 rounded bg-[#FAF5EA] border border-[#111111] text-[10px] font-mono font-bold text-[#111111]">
                             BIB: {p.bib || "NO BIB"}
                           </span>
@@ -423,6 +508,88 @@ export default function CollectivePickupModal({
                           </span>
                           <span>•</span>
                           <span className="text-[#111111]/60 truncate">{p.pendaftaran_melalui}</span>
+                        </div>
+
+                        {/* Dokumen Bukti Bayar & Surat Kuasa Peserta */}
+                        <div className="mt-2 pt-2 border-t border-[#D8CDB8] flex flex-wrap items-center gap-2 text-[11px]">
+                          {/* Bukti Bayar */}
+                          <div className="flex items-center gap-1.5 bg-[#FAF5EA] px-2.5 py-1 rounded-lg border border-[#D8CDB8]">
+                            <span className="font-bold text-[#111111]/70">Bukti Bayar:</span>
+                            {p.bukti_bayar_path ? (
+                              <a
+                                href={`/api/documents/${p.id}/bukti_bayar`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#26734D] font-bold hover:underline inline-flex items-center gap-0.5"
+                              >
+                                <span>✓ Di Sistem</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            ) : participantBuktiFiles[p.id] ? (
+                              <div className="inline-flex items-center gap-1 text-[#26734D] font-bold">
+                                <span>📸 {participantBuktiFiles[p.id].name.slice(0, 12)}...</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveBukti(p.id)}
+                                  className="text-[#D71920] hover:bg-[#E6D8BE] p-0.5 rounded"
+                                  title="Hapus foto"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center gap-1.5">
+                                <label className="cursor-pointer text-[#D71920] font-bold hover:underline inline-flex items-center gap-0.5">
+                                  <Camera className="w-3 h-3" />
+                                  <span>Foto</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    capture="environment"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) handleSetBukti(p.id, f);
+                                    }}
+                                  />
+                                </label>
+                                <span className="text-[#111111]/30">|</span>
+                                <label className="cursor-pointer text-[#111111] font-bold hover:underline inline-flex items-center gap-0.5">
+                                  <Upload className="w-3 h-3 text-[#111111]/60" />
+                                  <span>Pilih</span>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) handleSetBukti(p.id, f);
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Surat Kuasa Status */}
+                          <div className="flex items-center gap-1.5 bg-[#FAF5EA] px-2.5 py-1 rounded-lg border border-[#D8CDB8]">
+                            <span className="font-bold text-[#111111]/70">Surat Kuasa:</span>
+                            {collectiveSuratKuasaFiles.length > 0 ? (
+                              <span className="text-[#26734D] font-bold">✓ Kuasa Kolektif ({collectiveSuratKuasaFiles.length})</span>
+                            ) : p.surat_kuasa_path ? (
+                              <a
+                                href={`/api/documents/${p.id}/surat_kuasa`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#26734D] font-bold hover:underline inline-flex items-center gap-0.5"
+                              >
+                                <span>✓ Di Sistem</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            ) : (
+                              <span className="text-[#D71920] font-bold">Lampirkan di atas</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

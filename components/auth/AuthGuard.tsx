@@ -8,7 +8,7 @@ import Link from "next/link";
 
 interface AuthGuardProps {
   children: React.ReactNode;
-  requiredRole?: "admin" | "petugas";
+  requiredRole?: "superadmin" | "admin" | "petugas";
 }
 
 export default function AuthGuard({ children, requiredRole }: AuthGuardProps) {
@@ -74,7 +74,12 @@ export default function AuthGuard({ children, requiredRole }: AuthGuardProps) {
   }
 
   // 3. Unauthorized Role State (e.g. Non-admin accessing admin panel)
-  if (requiredRole === "admin" && role !== "admin") {
+  const isAuthorized =
+    !requiredRole ||
+    role === requiredRole ||
+    (requiredRole === "admin" && role === "superadmin");
+
+  if (!isAuthorized) {
     return (
       <main className="flex-1 flex items-center justify-center min-h-[65vh] p-4">
         <div className="max-w-md w-full p-6 sm:p-8 rounded-2xl bg-[#FAF5EA] border-2 border-[#111111] shadow-sm text-center space-y-5">
@@ -87,7 +92,7 @@ export default function AuthGuard({ children, requiredRole }: AuthGuardProps) {
               Hak Akses Tidak Memadai
             </h2>
             <p className="text-xs text-[#111111]/75 leading-relaxed">
-              Akun Anda tercatat sebagai <strong className="text-[#111111] uppercase">{role || "Petugas"}</strong> ({user.displayName || user.email}). Halaman ini memerlukan hak akses <strong>Administrator</strong>.
+              Akun Anda tercatat sebagai <strong className="text-[#111111] uppercase">{role || "Petugas"}</strong> ({user.displayName || user.email}). Halaman ini memerlukan hak akses <strong>{requiredRole === "superadmin" ? "Super Administrator" : "Administrator"}</strong>.
             </p>
           </div>
 

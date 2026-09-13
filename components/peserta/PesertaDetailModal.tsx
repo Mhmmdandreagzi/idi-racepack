@@ -15,7 +15,14 @@ import {
   Tag,
   MapPin,
   RotateCcw,
+  FileText,
+  ExternalLink,
+  Mail,
 } from "lucide-react";
+import DocumentCapture from "@/components/documents/DocumentCapture";
+import { uploadPesertaDocument, uploadPesertaDocuments } from "@/lib/services/documentService";
+import { useToast } from "@/context/ToastContext";
+import TypedConfirmModal from "@/components/ui/TypedConfirmModal";
 
 interface PesertaDetailModalProps {
   peserta: Peserta | null;
@@ -29,8 +36,16 @@ export default function PesertaDetailModal({
   onPickupSuccess,
 }: PesertaDetailModalProps) {
   const { user, role } = useAuth();
+  const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  // Document upload / camera photo states
+  const [buktiBayarFile, setBuktiBayarFile] = useState<File | null>(null);
+  const [isDiwakilkan, setIsDiwakilkan] = useState(Boolean(peserta?.is_kolektif || peserta?.surat_kuasa_path));
+  const [suratKuasaFiles, setSuratKuasaFiles] = useState<File[]>([]);
+  const [namaPengambil, setNamaPengambil] = useState(peserta?.diambil_oleh || "");
+  const [noHpPengambil, setNoHpPengambil] = useState(peserta?.no_hp_pengambil || "");
 
   if (!peserta) return null;
 
@@ -39,34 +54,76 @@ export default function PesertaDetailModal({
   const handlePickup = async () => {
     if (isProcessing) return; // Prevent double trigger
     if (!user) {
-      setErrorMsg("Anda harus login untuk melakukan konfirmasi pengambilan.");
+      toast.error("Anda harus login untuk melakukan konfirmasi pengambilan.");
       return;
     }
 
+    // Validation: Bukti Bayar is required
+    const hasBuktiBayar = Boolean(peserta.bukti_bayar_path) || Boolean(buktiBayarFile);
+    if (!hasBuktiBayar) {
+      toast.error("Harap ambil foto atau unggah file bukti pembayaran sebelum mengambil racepack.");
+      return;
+    }
+
+    // Validation: Surat Kuasa if diwakilkan
+    if (isDiwakilkan) {
+      const hasSuratKuasa = Boolean(peserta.surat_kuasa_path) || suratKuasaFiles.length > 0;
+      if (!hasSuratKuasa) {
+        toast.error("Harap ambil foto atau unggah file surat kuasa perwakilan (bisa banyak foto).");
+        return;
+      }
+      if (!namaPengambil.trim()) {
+        toast.error("Nama perwakilan yang mengambilkan wajib diisi.");
+        return;
+      }
+    }
+
     setIsProcessing(true);
-    setErrorMsg(null);
 
     try {
+      let updatedBuktiPath = peserta.bukti_bayar_path;
+      let updatedKuasaPath = peserta.surat_kuasa_path;
+
+      // 1. Upload Bukti Bayar if new file selected or photographed
+      if (buktiBayarFile) {
+        const uploadRes = await uploadPesertaDocument(peserta.id, "bukti_bayar", buktiBayarFile);
+        updatedBuktiPath = uploadRes.metadata?.filePath || updatedBuktiPath;
+      }
+
+      // 2. Upload Surat Kuasa if diwakilkan & new files selected or photographed
+      if (isDiwakilkan && suratKuasaFiles.length > 0) {
+        const uploadRes = await uploadPesertaDocuments(peserta.id, "surat_kuasa", suratKuasaFiles);
+        updatedKuasaPath = uploadRes.metadata?.filePath || updatedKuasaPath;
+      }
+
+      // 3. Confirm atomic pickup transaction in MySQL
       const res = await confirmRacepackPickup(peserta, user);
       if (res.peserta) {
-        onPickupSuccess(res.peserta);
+        toast.success(`Racepack untuk ${peserta.nama} berhasil diserahkan!`);
+        onPickupSuccess({
+          ...res.peserta,
+          bukti_bayar_path: updatedBuktiPath,
+          surat_kuasa_path: updatedKuasaPath,
+          is_kolektif: isDiwakilkan,
+          diambil_oleh: isDiwakilkan ? (namaPengambil.trim() || undefined) : undefined,
+          no_hp_pengambil: isDiwakilkan ? (noHpPengambil.trim() || undefined) : undefined,
+        });
       }
     } catch (err: any) {
       console.error("Pickup error:", err);
-      setErrorMsg(err.message || "Terjadi kesalahan saat menyimpan pengambilan.");
+      toast.error(err.message || "Terjadi kesalahan saat menyimpan pengambilan.");
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleReset = async () => {
-    if (!user || role !== "admin") return;
-    if (!confirm(`Batalkan status pengambilan racepack untuk "${peserta.nama}"?`)) return;
+  const handleExecuteReset = async () => {
+    if (!user || (role !== "admin" && role !== "superadmin")) return;
 
     setIsProcessing(true);
-    setErrorMsg(null);
     try {
-      await resetRacepackPickup(peserta.id, user);
+      await resetRacepackPickup(peserta.id, user, "BATALKAN");
+      toast.success("Status pengambilan berhasil dibatalkan.");
       onPickupSuccess({
         ...peserta,
         status_pengambilan: false,
@@ -74,9 +131,11 @@ export default function PesertaDetailModal({
         petugas_id: null,
         petugas_nama: null,
       });
+      setIsResetConfirmOpen(false);
       onClose();
     } catch (err: any) {
-      setErrorMsg(err.message || "Gagal membatalkan pengambilan.");
+      console.error("Reset error:", err);
+      toast.error(err.message || "Gagal membatalkan status.");
     } finally {
       setIsProcessing(false);
     }
@@ -95,7 +154,12 @@ export default function PesertaDetailModal({
               VERIFIKASI MEJA REGISTRASI
             </span>
             <h2 className="font-display text-2xl font-normal leading-tight text-white mt-0.5">
-              {peserta.nama}
+              <span>{peserta.nama}</span>
+              {peserta.nama_bib && peserta.nama_bib.trim() ? (
+                <span className="text-[#D4B84C] font-bold ml-2 px-2 py-0.5 rounded-lg bg-[#D4B84C]/15 border border-[#D4B84C]/30 text-lg sm:text-xl tracking-wide inline-block">
+                  ({peserta.nama_bib.trim()})
+                </span>
+              ) : null}
             </h2>
           </div>
           <button
@@ -136,20 +200,13 @@ export default function PesertaDetailModal({
             </div>
           )}
 
-          {/* Error Message */}
-          {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-[#FAF5EA] border-2 border-[#D71920] text-[#D71920] text-xs font-bold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-[#D71920] shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
 
           {/* Grid Info Participant (style.md Section 29) */}
           <div className="grid grid-cols-2 gap-3">
             {/* BIB */}
             <div className="p-3.5 rounded-xl bg-[#F3E8D2] border border-[#D8CDB8]">
               <span className="text-[10px] uppercase font-bold tracking-wider text-[#111111]/60 block">
-                NOMOR BIB
+                NOMOR BIB {peserta.nama_bib ? `• ${peserta.nama_bib}` : ""}
               </span>
               <span className="font-display text-3xl font-normal text-[#111111] leading-none block mt-1">
                 {peserta.bib || "NO BIB"}
@@ -218,12 +275,38 @@ export default function PesertaDetailModal({
             <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
               <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
                 <Phone className="w-4 h-4 text-[#111111]" />
-                <span>Nomor HP</span>
+                <span>Nomor HP (Telp 1)</span>
               </div>
               <span className="font-mono font-bold text-[#111111]">
-                {peserta.no_hp || "-"}
+                {peserta.no_telp_1 || peserta.no_hp || "-"}
               </span>
             </div>
+
+            {/* No Telp 2 (Jika ada) */}
+            {peserta.no_telp_2 && (
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
+                <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
+                  <Phone className="w-4 h-4 text-[#111111]" />
+                  <span>No Telp 2</span>
+                </div>
+                <span className="font-mono font-bold text-[#111111]">
+                  {peserta.no_telp_2}
+                </span>
+              </div>
+            )}
+
+            {/* Email (Jika ada) */}
+            {peserta.email && (
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
+                <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
+                  <Mail className="w-4 h-4 text-[#111111]" />
+                  <span>Email</span>
+                </div>
+                <span className="font-mono font-bold text-[#111111] text-[11px]">
+                  {peserta.email}
+                </span>
+              </div>
+            )}
 
             {/* Sumber Pendaftaran */}
             <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
@@ -232,9 +315,22 @@ export default function PesertaDetailModal({
                 <span>Pendaftaran Melalui</span>
               </div>
               <span className="font-bold text-[#26734D] uppercase">
-                {peserta.pendaftaran_melalui}
+                {peserta.pendaftaran_melalui || peserta.daftar_melalui}
               </span>
             </div>
+
+            {/* Kode Registrasi (Jika ada) */}
+            {(peserta.kode_1 || peserta.kode_2) && (
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
+                <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
+                  <Tag className="w-4 h-4 text-[#111111]" />
+                  <span>Kode Booking</span>
+                </div>
+                <span className="font-mono text-[10px] font-bold text-[#111111]">
+                  {peserta.kode_1 || peserta.kode_2}
+                </span>
+              </div>
+            )}
 
             {/* Alamat */}
             {peserta.alamat && (
@@ -243,21 +339,155 @@ export default function PesertaDetailModal({
                 <span>{peserta.alamat}</span>
               </div>
             )}
+
+            {/* Dokumen Verifikasi: Bukti Bayar & Surat Kuasa */}
+            {isAlreadyPicked ? (
+              <div className="space-y-2">
+                {/* Bukti Pembayaran Read-only */}
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
+                  <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
+                    <FileText className="w-4 h-4 text-[#111111]" />
+                    <span>Bukti Pembayaran</span>
+                  </div>
+                  {peserta.bukti_bayar_path ? (
+                    <a
+                      href={`/api/documents/${peserta.id}/bukti_bayar`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#26734D] hover:underline"
+                    >
+                      <span>Lihat Dokumen</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-[#111111]/50 font-medium">Tersedia via Sistem</span>
+                  )}
+                </div>
+
+                {/* Surat Kuasa Read-only */}
+                {(peserta.is_kolektif || peserta.surat_kuasa_path) && (
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8]">
+                    <div className="flex items-center gap-2 text-[#111111]/70 font-semibold">
+                      <FileText className="w-4 h-4 text-[#D71920]" />
+                      <span>Surat Kuasa</span>
+                    </div>
+                    {peserta.surat_kuasa_path ? (
+                      <a
+                        href={`/api/documents/${peserta.id}/surat_kuasa`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-[#26734D] hover:underline"
+                      >
+                        <span>Lihat Dokumen</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-[11px] text-[#D71920] font-semibold">Verifikasi Meja Kolektif</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Before pickup: Interactive Document Capture (Camera / File) */
+              <div className="pt-2 border-t border-[#D8CDB8] space-y-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#111111] flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-[#D71920]" />
+                  Dokumen Wajib Sebelum Serah Terima
+                </span>
+
+                {/* 1. Bukti Pembayaran */}
+                <DocumentCapture
+                  label="Bukti Pembayaran"
+                  category="bukti_bayar"
+                  pesertaId={peserta.id}
+                  existingPath={peserta.bukti_bayar_path}
+                  existingName={peserta.bukti_bayar_original_name}
+                  selectedFile={buktiBayarFile}
+                  onFileChange={setBuktiBayarFile}
+                  required={true}
+                  disabled={isProcessing}
+                  helperText="Ambil foto struk / transfer bukti pembayaran atau unggah file dokumen."
+                />
+
+                {/* 2. Checkbox Pengambilan Diwakilkan */}
+                <div className="p-3.5 rounded-xl bg-[#F3E8D2] border border-[#D8CDB8] space-y-3">
+                  <label className="flex items-center gap-2 text-xs font-bold text-[#111111] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isDiwakilkan}
+                      onChange={(e) => setIsDiwakilkan(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#D71920] focus:ring-[#D71920] border-[#111111]"
+                      disabled={isProcessing}
+                    />
+                    <span>Pengambilan Diwakilkan Orang Lain? (Lampirkan Surat Kuasa)</span>
+                  </label>
+
+                  {isDiwakilkan && (
+                    <div className="space-y-3 pt-2.5 border-t border-[#D8CDB8]">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-[#111111]/70 block uppercase">
+                            Nama Yang Mengambilkan <span className="text-[#D71920]">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={namaPengambil}
+                            onChange={(e) => setNamaPengambil(e.target.value)}
+                            placeholder="Nama perwakilan"
+                            className="w-full px-3 py-2 rounded-lg bg-[#FAF5EA] border border-[#111111] text-xs text-[#111111] font-medium focus:outline-none focus:ring-1 focus:ring-[#D71920]"
+                            disabled={isProcessing}
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-[#111111]/70 block uppercase">
+                            No HP / WhatsApp Perwakilan
+                          </label>
+                          <input
+                            type="tel"
+                            value={noHpPengambil}
+                            onChange={(e) => setNoHpPengambil(e.target.value)}
+                            placeholder="Contoh: 08123456789"
+                            className="w-full px-3 py-2 rounded-lg bg-[#FAF5EA] border border-[#111111] text-xs text-[#111111] font-medium focus:outline-none focus:ring-1 focus:ring-[#D71920]"
+                            disabled={isProcessing}
+                          />
+                        </div>
+                      </div>
+
+                      <DocumentCapture
+                        label="Surat Kuasa Perwakilan"
+                        category="surat_kuasa"
+                        pesertaId={peserta.id}
+                        existingPath={peserta.surat_kuasa_path}
+                        existingName={peserta.surat_kuasa_original_name}
+                        allowMultiple={true}
+                        selectedFiles={suratKuasaFiles}
+                        onFilesChange={setSuratKuasaFiles}
+                        required={true}
+                        disabled={isProcessing}
+                        helperText="Bisa ambil banyak foto (halaman surat kuasa, KTP penerima/pemberi kuasa) atau pilih berkas."
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Modal Footer / Action Button (style.md Section 10) */}
         <div className="p-5 border-t-2 border-[#111111] bg-[#E6D8BE]/70 flex items-center gap-3">
-          {/* Admin Reset Button */}
-          {isAlreadyPicked && role === "admin" && (
+          {/* Admin / Super Admin Reset Button */}
+          {isAlreadyPicked && (role === "admin" || role === "superadmin") && (
             <button
-              onClick={handleReset}
+              onClick={() => setIsResetConfirmOpen(true)}
               disabled={isProcessing}
-              className="px-4 py-3 rounded-lg border-2 border-[#D71920] text-[#D71920] hover:bg-[#FAF5EA] text-xs font-bold uppercase flex items-center gap-1.5 transition disabled:opacity-50"
-              title="Batalkan pengambilan (Hanya Admin)"
+              className="px-4 py-3 rounded-lg border-2 border-[#D71920] text-[#D71920] hover:bg-[#FAF5EA] text-xs font-bold uppercase flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
+              title="Batalkan pengambilan"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Reset</span>
+              <span>Reset Status</span>
             </button>
           )}
 
@@ -266,7 +496,7 @@ export default function PesertaDetailModal({
             <button
               onClick={handlePickup}
               disabled={isProcessing}
-              className="flex-1 py-3.5 px-4 rounded-lg bg-[#D71920] hover:bg-[#b5141a] active:bg-[#961015] text-white font-bold text-sm tracking-wider uppercase transition duration-150 flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+              className="flex-1 py-3.5 px-4 rounded-lg bg-[#D71920] hover:bg-[#b5141a] active:bg-[#961015] text-white font-bold text-sm tracking-wider uppercase transition duration-150 flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
             >
               {isProcessing ? (
                 <>
@@ -283,13 +513,25 @@ export default function PesertaDetailModal({
           ) : (
             <button
               onClick={onClose}
-              className="flex-1 py-3 px-4 rounded-lg bg-[#111111] hover:bg-[#333333] text-[#F3E8D2] font-bold text-xs uppercase tracking-wider transition"
+              className="flex-1 py-3 px-4 rounded-lg bg-[#111111] hover:bg-[#333333] text-[#F3E8D2] font-bold text-xs uppercase tracking-wider transition cursor-pointer"
             >
               Tutup
             </button>
           )}
         </div>
       </div>
+
+      {/* Typed Confirmation Modal for Reset */}
+      <TypedConfirmModal
+        isOpen={isResetConfirmOpen}
+        onClose={() => setIsResetConfirmOpen(false)}
+        onConfirm={handleExecuteReset}
+        title="Batalkan Pengambilan Racepack"
+        description={`Status pengambilan untuk peserta "${peserta.nama}" (BIB: ${peserta.bib || "-"}) akan diubah kembali menjadi BELUM DIAMBIL.`}
+        expectedKeyword="BATALKAN"
+        confirmButtonLabel="Ya, Batalkan Pengambilan"
+        isLoading={isProcessing}
+      />
     </div>
   );
 }

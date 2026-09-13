@@ -54,7 +54,7 @@ export default function PickupSuccessModal({
             RACEPACK BERHASIL DIAMBIL!
           </h2>
           <p className="text-xs text-[#111111]/70 mt-1 font-medium">
-            Transaksi serah terima resmi tercatat ke Cloud Firestore
+            Transaksi serah terima resmi tercatat ke sistem database
           </p>
         </div>
 
@@ -65,7 +65,7 @@ export default function PickupSuccessModal({
               NAMA PESERTA
             </span>
             <p className="font-display text-2xl font-normal text-[#111111] leading-tight mt-0.5">
-              {peserta.nama}
+              {peserta.nama}{peserta.nama_bib && peserta.nama_bib.trim() ? ` (${peserta.nama_bib.trim()})` : ""}
             </p>
           </div>
 

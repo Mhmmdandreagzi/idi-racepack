@@ -125,7 +125,14 @@ export default function CollectiveSuccessModal({
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-[#111111] truncate">{p.nama}</span>
+                        <span className="font-bold text-[#111111] truncate">
+                          <span>{p.nama}</span>
+                          {p.nama_bib && p.nama_bib.trim() ? (
+                            <span className="text-[#D71920] font-bold ml-1.5 px-1.5 py-0.5 rounded bg-[#D71920]/10 text-xs">
+                              ({p.nama_bib.trim()})
+                            </span>
+                          ) : null}
+                        </span>
                         <span className="px-1.5 py-0.2 rounded bg-[#FAF5EA] border border-[#111111] text-[10px] font-mono font-bold shrink-0">
                           BIB: {p.bib || "NO BIB"}
                         </span>

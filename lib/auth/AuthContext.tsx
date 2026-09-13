@@ -1,8 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { AppUser, UserRole, UserAccount } from "@/types/user";
-import hardcodedUsers from "@/data/users.json";
+import { AppUser, UserRole } from "@/types/user";
 
 interface AuthContextType {
   user: AppUser | null;
@@ -13,82 +12,95 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-const SESSION_KEY = "idi_racepack_user_session";
+const SESSION_CACHE_KEY = "idi_racepack_user_session";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore saved session from localStorage on mount
+  // Check active server session on mount
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    let isMounted = true;
+
+    async function checkCurrentSession() {
+      // Optimistic load from local storage for fast UX
+      if (typeof window !== "undefined") {
+        try {
+          const cached = localStorage.getItem(SESSION_CACHE_KEY);
+          if (cached) {
+            setUser(JSON.parse(cached));
+          }
+        } catch (e) {
+          // ignore cache parse error
+        }
+      }
+
       try {
-        const saved = localStorage.getItem(SESSION_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved) as AppUser;
-          // Verify user still exists in hardcoded json
-          const valid = (hardcodedUsers as UserAccount[]).find(
-            (u) => u.email.toLowerCase() === parsed.email.toLowerCase() && u.isActive
-          );
-          if (valid) {
-            setUser(parsed);
-          } else {
-            localStorage.removeItem(SESSION_KEY);
+        const res = await fetch("/api/auth/me", {
+          method: "GET",
+          headers: { credentials: "same-origin" },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.success && data.user) {
+            setUser(data.user);
+            if (typeof window !== "undefined") {
+              localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(data.user));
+            }
+          } else if (isMounted) {
             setUser(null);
+            if (typeof window !== "undefined") {
+              localStorage.removeItem(SESSION_CACHE_KEY);
+            }
+          }
+        } else if (isMounted) {
+          setUser(null);
+          if (typeof window !== "undefined") {
+            localStorage.removeItem(SESSION_CACHE_KEY);
           }
         }
-      } catch (e) {
-        console.warn("Session restore failed:", e);
-        setUser(null);
+      } catch (err) {
+        console.warn("Session verification network error:", err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
-    setIsLoading(false);
+
+    checkCurrentSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Pure JSON Hardcoded Authentication
   const login = async (
     email: string,
     pass: string
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      const cleanPass = pass.trim();
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: pass }),
+      });
 
-      const matched = (hardcodedUsers as UserAccount[]).find(
-        (u) => u.email.toLowerCase() === cleanEmail
-      );
+      const data = await res.json();
 
-      if (!matched) {
+      if (!res.ok || !data.success) {
         setIsLoading(false);
         return {
           success: false,
-          error: "Email tidak terdaftar dalam sistem.",
+          error: data.error || "Gagal melakukan login. Silakan coba lagi.",
         };
       }
 
-      if (matched.password !== cleanPass) {
-        setIsLoading(false);
-        return {
-          success: false,
-          error: "Password yang Anda masukkan salah.",
-        };
-      }
-
-      if (!matched.isActive) {
-        setIsLoading(false);
-        return {
-          success: false,
-          error: "Akun ini telah dinonaktifkan.",
-        };
-      }
-
-      const { password: _, ...appUser } = matched;
-      setUser(appUser);
-
+      setUser(data.user);
       if (typeof window !== "undefined") {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(appUser));
+        localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(data.user));
       }
 
       setIsLoading(false);
@@ -97,15 +109,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       return {
         success: false,
-        error: err.message || "Gagal melakukan login. Silakan coba lagi.",
+        error: err.message || "Terjadi kesalahan jaringan saat mencoba login.",
       };
     }
   };
 
   const logout = async () => {
-    setUser(null);
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(SESSION_KEY);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.warn("Logout error:", err);
+    } finally {
+      setUser(null);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(SESSION_CACHE_KEY);
+      }
     }
   };
 

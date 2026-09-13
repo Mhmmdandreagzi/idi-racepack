@@ -12,8 +12,10 @@ import {
 } from "lucide-react";
 import * as xlsx from "xlsx";
 import AuthGuard from "@/components/auth/AuthGuard";
+import { useToast } from "@/context/ToastContext";
 
 function PengambilanContent() {
+  const { toast } = useToast();
   const [logs, setLogs] = useState<PengambilanLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -35,12 +37,12 @@ function PengambilanContent() {
   }, []);
 
   const filteredLogs = useMemo(() => {
-    if (!search.trim()) return logs;
     const q = search.toLowerCase().trim();
+    if (!q) return logs;
     return logs.filter(
       (l) =>
         l.peserta_nama.toLowerCase().includes(q) ||
-        l.peserta_bib.toLowerCase().includes(q) ||
+        (l.peserta_bib && l.peserta_bib.toLowerCase().includes(q)) ||
         l.petugas_nama.toLowerCase().includes(q) ||
         l.pendaftaran_melalui.toLowerCase().includes(q)
     );
@@ -48,7 +50,7 @@ function PengambilanContent() {
 
   const handleExportExcel = () => {
     if (logs.length === 0) {
-      alert("Belum ada data riwayat pengambilan untuk diekspor.");
+      toast.warning("Belum ada data riwayat pengambilan untuk diekspor.");
       return;
     }
 
@@ -170,7 +172,15 @@ function PengambilanContent() {
                       {new Date(log.waktu_pengambilan).toLocaleString("id-ID")} WIB
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[#26734D] text-white">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          log.status === "BERHASIL"
+                            ? "bg-[#26734D] text-white"
+                            : log.status === "DIBATALKAN"
+                            ? "bg-[#D71920] text-white"
+                            : "bg-[#D4B84C] text-[#111111]"
+                        }`}
+                      >
                         <CheckCircle2 className="w-3 h-3" />
                         {log.status}
                       </span>

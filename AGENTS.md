@@ -1,1285 +1,699 @@
-# AGENTS.md
+# AGENTS.md --- RUN IDI RUN
 
-## Project: Racepack Management System
+## 1. Scope
 
-This project is a high-performance web application for managing participant registration and racepack pickup for a running event.
+Dokumen ini hanya mengatur **rules teknis, aturan bisnis, keamanan, dan
+alur bisnis** aplikasi RUN IDI RUN.
 
-The application will be built with:
+**Jangan mengubah style, desain visual, layout, struktur halaman, warna,
+typography, atau page yang sudah tersedia.**
 
-* **Next.js**
-* **TypeScript**
-* **Firebase Authentication**
-* **Cloud Firestore**
-* **Tailwind CSS**
-* **Vercel**
+Jika ada kebutuhan perubahan UI, pertahankan design system dan page
+existing sebagai sumber kebenaran.
 
-The primary goal is:
+------------------------------------------------------------------------
 
-> **Extremely fast participant search and racepack pickup, with minimal Firestore reads/writes and safe concurrent operations between multiple staff members.**
+## 2. Stack & Infrastruktur
 
----
+Aplikasi menggunakan:
 
-# 1. Core Requirements
+-   Next.js full-stack
+-   TypeScript
+-   Tailwind CSS
+-   MySQL
+-   Hostinger Unlimited
+-   File storage menggunakan storage/server filesystem Hostinger
 
-The system manages approximately 1,000–2,000 participants.
+Firebase tidak digunakan sebagai backend aplikasi.
 
-Current source data contains approximately:
+------------------------------------------------------------------------
 
-* 1,166 participant rows
-* Multiple registration sources
-* Each original Excel sheet represents a `pendaftaran_melalui` category
-* Some participants do not have BIB numbers
-* Some BIB values may be duplicated or invalid
-* Participant names are not guaranteed to be unique
+## 3. Prinsip Utama
 
-The system must support:
+1.  MySQL adalah sumber data utama (source of truth).
+2.  File dokumen disimpan di storage Hostinger, bukan di MySQL.
+3.  MySQL hanya menyimpan metadata/path file.
+4.  Semua operasi penting harus divalidasi di server.
+5.  Jangan mempercayai data dari browser/client.
+6.  Authentication dan authorization harus dilakukan server-side.
+7.  Jangan pernah menyimpan password plaintext.
+8.  Jangan mengekspos credential database atau secret ke client.
+9.  Jangan membuat file bukti pembayaran atau surat kuasa menjadi
+    public.
+10. Jangan mengubah UI/page yang sudah tersedia hanya untuk menyesuaikan
+    implementasi backend.
 
-1. Staff login
-2. Participant search
-3. Participant detail
-4. Racepack pickup confirmation
-5. Pickup timestamp
-6. Staff identification
-7. Pickup history/audit
-8. Dashboard statistics
-9. Multiple staff/devices working simultaneously
-10. Fast operation during the event
+------------------------------------------------------------------------
 
----
+## 4. Roles
 
-# 2. Technology Stack
+### Admin
 
-Use:
+Admin dapat:
 
-```text
-Next.js
-TypeScript
-Tailwind CSS
-Firebase Authentication
-Cloud Firestore
-Vercel
-```
+-   Login.
+-   Melihat dashboard.
+-   Melihat seluruh peserta.
+-   Mencari peserta.
+-   Mengelola user/petugas.
+-   Melihat status pengambilan.
+-   Melihat dokumen peserta.
+-   Mengelola atau mengoreksi data pengambilan sesuai aturan (hanya admin).
+-   Melakukan import data peserta.
+-   Melihat statistik.
 
-Prefer the latest stable versions compatible with the project.
+### Petugas
 
-Use strict TypeScript.
+Petugas dapat:
 
-Avoid unnecessary dependencies.
+-   Login.
+-   Mencari peserta.
+-   Melihat detail peserta yang diperlukan untuk proses racepack.
+-   Melihat bukti pembayaran/surat kuasa jika memiliki hak akses.
+-   Melakukan proses pengambilan racepack.
+-   Melihat status bahwa peserta sudah/belum mengambil.
 
-Do not introduce another backend framework unless explicitly requested.
+Petugas **tidak boleh**:
 
----
+-   Menghapus peserta.
+-   Menghapus user.
+-   Mengubah data master peserta secara bebas.
+-   Mengubah histori pengambilan secara langsung.
+-   Mengakses fungsi administrasi yang hanya diperuntukkan bagi admin.
 
-# 3. Architecture
+------------------------------------------------------------------------
 
-Recommended architecture:
+## 5. Aturan Data Peserta
 
-```text
-                         Vercel
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │   Next.js   │
-                    │   Website   │
-                    └──────┬──────┘
-                           │
-             ┌─────────────┴─────────────┐
-             │                           │
-             ▼                           ▼
-      Firebase Auth              Cloud Firestore
-       Staff Login                Participant Data
-                                      │
-                                      ▼
-                              ~1,166 participants
-```
+Setiap peserta memiliki ID internal yang unik.
 
-The application should minimize network requests.
+**BIB bukan primary key dan bukan ID database.**
 
-Participant search should preferably happen locally after the participant dataset has been loaded.
+BIB dapat:
 
----
+-   kosong pada sebagian data sumber;
+-   memiliki format berbeda;
+-   berpotensi duplikat pada data sumber.
 
-# 4. Performance Philosophy
+Karena itu jangan mengasumsikan BIB selalu unik secara database.
 
-Performance is a first-class requirement.
+Data peserta minimal dapat mencakup:
 
-The application will be used during a live event where staff need to process participants quickly.
+-   id
+-   nama
+-   bib
+-   kategori
+-   nik
+-   no_hp
+-   jenis_kelamin
+-   tanggal_lahir
+-   alamat
+-   ukuran_jersey
+-   pendaftaran_melalui
+-   metadata bukti pembayaran
+-   metadata surat kuasa
+-   created_at
+-   updated_at
 
-The critical workflow is:
+Jangan melakukan auto-merge peserta hanya karena nama sama.
 
-```text
-Search participant
-      ↓
-Select participant
-      ↓
-Verify participant
-      ↓
-Confirm pickup
-      ↓
-Show success
-```
+------------------------------------------------------------------------
 
-This workflow must have as little latency as reasonably possible.
+## 6. Aturan Pengambilan Racepack
 
-## Critical rules
+1.  Satu peserta hanya boleh memiliki satu pengambilan sukses.
+2.  Petugas harus login.
+3.  Server harus memverifikasi role petugas/admin.
+4.  Sebelum mencatat pengambilan, server harus memeriksa status terbaru
+    peserta.
+5.  Proses pengecekan dan pencatatan harus menggunakan database
+    transaction.
+6.  Gunakan row locking (`SELECT ... FOR UPDATE`) atau mekanisme
+    transaksi setara.
+7.  Jika peserta sudah diambil, request berikutnya harus ditolak sebagai
+    **sudah diambil**, bukan membuat record kedua.
+8.  Waktu pengambilan dicatat dari server/database, bukan dipercaya dari
+    browser.
+9.  ID petugas yang melakukan pengambilan wajib dicatat.
+10. Histori pengambilan tidak boleh diubah oleh petugas biasa.
 
-### DO
+Contoh transaksi:
 
-* Cache participant data in the browser.
-* Search participant data locally whenever practical.
-* Minimize Firestore reads.
-* Minimize Firestore writes.
-* Use Firestore transactions for pickup confirmation.
-* Use server timestamps.
-* Keep the pickup UI lightweight.
-* Optimize mobile/tablet usage.
-* Use indexed fields where Firestore queries are required.
-* Use pagination for large administrative lists.
-* Keep dashboard reads minimal.
-* Use optimistic UI only where consistency is not compromised.
-
-### DO NOT
-
-* Query Firestore on every keystroke.
-* Download all participant documents repeatedly.
-* Recalculate dashboard statistics by reading all participants.
-* Use Firestore realtime listeners everywhere.
-* Perform unnecessary reads after every update.
-* Put large unnecessary objects into Firestore documents.
-* Load heavy components on the primary pickup page.
-* Use a server request for operations that can safely be performed locally.
-
----
-
-# 5. Participant Search
-
-The primary search is by participant name.
-
-Secondary search should support:
-
-* BIB
-* NIK
-* Phone number
-
-The search experience should feel instant.
-
-Preferred flow:
-
-```text
-Firestore
+``` text
+BEGIN TRANSACTION
     ↓
-Load participant dataset
+Lock peserta/pengambilan
     ↓
-Browser memory/cache
+Cek apakah sudah diambil
     ↓
-Local search
+Jika sudah:
+    ROLLBACK
+    → tampilkan "Racepack sudah diambil"
     ↓
-Results
-```
-
-Example:
-
-```text
-User types:
-
-b
-bu
-bud
-budi
-```
-
-Do NOT perform:
-
-```text
-b    → Firestore read
-bu   → Firestore read
-bud  → Firestore read
-budi → Firestore read
-```
-
-Instead:
-
-```text
-b
- ↓
-local filter
-
-bu
- ↓
-local filter
-
-bud
- ↓
-local filter
-
-budi
- ↓
-local filter
-```
-
-For approximately 1,166 participants, local filtering is expected to be extremely fast.
-
----
-
-# 6. Search Normalization
-
-Store a normalized search field:
-
-```text
-nama_search
-```
-
-Example:
-
-```json
-{
-  "nama": "Budi Santoso",
-  "nama_search": "budi santoso"
-}
-```
-
-Normalization should:
-
-* Convert to lowercase
-* Trim whitespace
-* Collapse repeated whitespace
-* Handle common formatting inconsistencies
-
-The original `nama` must never be modified merely for search purposes.
-
----
-
-# 7. Participant Data Model
-
-Recommended Firestore structure:
-
-```text
-peserta/{pesertaId}
-```
-
-Example:
-
-```json
-{
-  "nama": "Budi Santoso",
-  "nama_search": "budi santoso",
-  "bib": "40001",
-  "kategori": "10K",
-  "nik": "3529...",
-  "no_hp": "0812...",
-  "jenis_kelamin": "L",
-  "tanggal_lahir": "...",
-  "alamat": "...",
-  "ukuran_jersey": "L",
-  "pendaftaran_melalui": "TRIBUN",
-
-  "status_pengambilan": false,
-  "waktu_pengambilan": null,
-  "petugas_id": null
-}
-```
-
-Field names should use `snake_case` consistently.
-
----
-
-# 8. Document ID
-
-Do NOT use participant name as Firestore document ID.
-
-Do NOT assume BIB is always unique.
-
-Use a generated unique Firestore document ID or another guaranteed unique internal ID.
-
-Example:
-
-```text
-peserta/
-  a8Hd72k...
-  b91Ks82...
-  x71Lm92...
-```
-
-BIB is a business identifier, not necessarily a database primary key.
-
----
-
-# 9. Registration Source
-
-Every participant must have:
-
-```text
-pendaftaran_melalui
-```
-
-The value represents the original Excel sheet/source.
-
-Examples:
-
-```text
-TRIBUN
-IRSUP 1
-IDI SUMENEP
-BREU MANUAL
-VK RSUD
-PKM GULUK
-PKM PAMOLOKAN
-IRSUP 2
-MANUAL 1
-BPRS
-MANUAL 2 + powerfit
-```
-
-Do not remove this field.
-
-Do not automatically merge participants simply because their names are equal.
-
----
-
-# 10. Duplicate Handling
-
-Participant names are NOT unique.
-
-BIB values may also contain duplicates or invalid values.
-
-Therefore:
-
-```text
-nama != unique identifier
-bib != guaranteed unique identifier
-```
-
-Duplicate detection must use appropriate identifying information such as:
-
-* BIB
-* NIK
-* phone
-* registration source
-* participant name
-
-Never automatically delete duplicate records without explicit business confirmation.
-
----
-
-# 11. Racepack Pickup
-
-Pickup is the most critical operation.
-
-When a staff member clicks:
-
-```text
-AMBIL RACEPACK
-```
-
-the system must safely verify the current status before changing it.
-
-Preferred behavior:
-
-```text
-BELUM DIAMBIL
-      ↓
-atomic transaction
-      ↓
-SUDAH DIAMBIL
-```
-
-The operation must prevent two staff members from successfully claiming the same participant simultaneously.
-
----
-
-# 12. Race Condition Protection
-
-Example:
-
-```text
-Staff A ─────┐
-             ├──> Budi
-Staff B ─────┘
-```
-
-Both staff may open Budi at approximately the same time.
-
-Only one should successfully change:
-
-```text
-status_pengambilan: false
-```
-
-to:
-
-```text
-status_pengambilan: true
-```
-
-The other staff member must receive a clear message:
-
-> Racepack sudah diambil oleh petugas lain.
-
-Use a Firestore transaction or another atomic consistency mechanism.
-
-Never rely only on client-side checks.
-
-This is critical.
-
----
-
-# 13. Pickup Data
-
-When pickup succeeds, store:
-
-```json
-{
-  "status_pengambilan": true,
-  "waktu_pengambilan": "server timestamp",
-  "petugas_id": "..."
-}
-```
-
-Use Firestore server timestamp.
-
-Do NOT trust the client's local clock for the official pickup time.
-
----
-
-# 14. Pickup History
-
-For auditability, consider a separate collection:
-
-```text
-pengambilan/{pengambilanId}
-```
-
-Example:
-
-```json
-{
-  "peserta_id": "...",
-  "petugas_id": "...",
-  "waktu_pengambilan": "...",
-  "status": "BERHASIL"
-}
-```
-
-This allows the system to answer:
-
-* Who processed the participant?
-* When was the racepack collected?
-* How many participants did each staff member process?
-* Was there an attempted duplicate pickup?
-
----
-
-# 15. Staff Authentication
-
-Use Firebase Authentication.
-
-Staff should not directly modify arbitrary participant fields.
-
-Authentication must be required for pickup operations.
-
-Recommended roles:
-
-```text
-admin
-petugas
-```
-
-Admin may:
-
-* Manage participants
-* Manage staff
-* View dashboard
-* Correct data
-* View audit history
-
-Petugas may:
-
-* Search participants
-* View required participant information
-* Confirm racepack pickup
-* View their own relevant pickup information
-
----
-
-# 16. Firestore Security
-
-Security rules are mandatory.
-
-Never rely only on hiding UI buttons.
-
-Firestore Security Rules must enforce authorization.
-
-Examples of protected operations:
-
-* Participant read
-* Participant update
-* Pickup creation
-* Staff management
-* Administrative operations
-
-Never expose Firebase Admin credentials to the browser.
-
-Never put:
-
-```text
-FIREBASE_ADMIN_PRIVATE_KEY
-```
-
-or other server secrets into `NEXT_PUBLIC_*` environment variables.
-
----
-
-# 17. Dashboard Performance
-
-Do NOT calculate dashboard statistics by reading every participant document each time.
-
-Avoid:
-
-```text
-Read 1,166 participants
-      ↓
-Count status
-      ↓
-Display dashboard
-```
-
-Prefer an aggregate/statistics document:
-
-```text
-stats/racepack
-```
-
-Example:
-
-```json
-{
-  "total": 1166,
-  "sudah_diambil": 723,
-  "belum_diambil": 443
-}
-```
-
-When a pickup succeeds:
-
-```text
-sudah_diambil + 1
-belum_diambil - 1
-```
-
-Use atomic increments where appropriate.
-
-Dashboard should require only a very small number of reads.
-
----
-
-# 18. Realtime Updates
-
-Realtime Firestore listeners should be used selectively.
-
-Do NOT attach listeners to the entire participant collection by default.
-
-Use realtime listeners only where there is a clear UX requirement.
-
-For the primary pickup screen:
-
-```text
-Search locally
-     ↓
-Open participant
-     ↓
-Perform atomic pickup
-```
-
-There is usually no need for a persistent realtime listener on every participant.
-
----
-
-# 19. Browser Cache
-
-Participant data should be cached where appropriate.
-
-Preferred strategy:
-
-```text
-First visit
+Jika belum:
+    INSERT pengambilan
     ↓
-Load participant data
-    ↓
-Store/cache locally
-    ↓
-Search locally
+COMMIT
 ```
 
-Possible technologies:
+Jika dua petugas melakukan proses pada peserta yang sama secara
+bersamaan, hanya satu transaksi yang boleh berhasil.
 
-* In-memory state
-* IndexedDB
-* Firestore offline persistence where appropriate
+------------------------------------------------------------------------
 
-The implementation should choose the simplest solution that provides reliable performance.
+## 7. Aturan File
 
-For approximately 1,166 records, avoid over-engineering.
+### Bukti pembayaran
 
----
+Format:
 
-# 20. Offline Considerations
+-   JPG/JPEG
+-   PNG
+-   WebP
+-   PDF
 
-The application may be used at an event where network conditions can become unreliable.
+Maksimum ukuran default: **5 MB per file**.
 
-The system should be designed with resilience in mind.
+### Surat kuasa
 
-However:
+Format:
 
-> Pickup confirmation must never falsely report success if the server has not safely recorded the operation.
+-   PDF
+-   JPG/JPEG
+-   PNG
 
-Local search can continue to work from cached participant data.
+Maksimum ukuran default: **5 MB per file**.
 
-Pickup confirmation should clearly distinguish:
+Batas ukuran dan tipe file harus mudah dikonfigurasi.
 
-```text
-Successfully recorded
+------------------------------------------------------------------------
+
+## 8. Keamanan File
+
+File bukti pembayaran dan surat kuasa dapat mengandung data pribadi.
+
+Rules:
+
+1.  Jangan menyimpan file di folder public.
+2.  Jangan membuat direct public URL.
+3.  Nama file asli dari user tidak boleh menjadi nama file penyimpanan
+    utama.
+4.  Generate nama file internal yang aman.
+5.  Validasi extension.
+6.  Validasi MIME/content type.
+7.  Validasi ukuran file di server.
+8.  Jangan hanya mengandalkan validasi JavaScript di browser.
+9.  Akses file harus melalui endpoint/server yang memeriksa
+    authentication dan authorization.
+10. Jangan mengirim credential storage ke browser.
+11. Jangan menyimpan binary file sebagai BLOB/Base64 di MySQL.
+
+Contoh struktur:
+
+``` text
+/storage
+  /peserta
+    /{peserta_id}
+      bukti-bayar.{ext}
+      surat-kuasa.{ext}
 ```
 
-from:
+Metadata file disimpan di MySQL, misalnya:
 
-```text
-Pending / failed
+``` text
+bukti_bayar_path
+bukti_bayar_original_name
+bukti_bayar_size
+bukti_bayar_mime
+bukti_bayar_uploaded_at
+
+surat_kuasa_path
+surat_kuasa_original_name
+surat_kuasa_size
+surat_kuasa_mime
+surat_kuasa_uploaded_at
 ```
 
-Do not show "Racepack berhasil diambil" merely because a local write has been queued unless the UX explicitly communicates that state.
+------------------------------------------------------------------------
 
----
+## 9. Aturan Upload File
 
-# 21. UI/UX
+Alur:
 
-The primary pickup interface should prioritize speed over decoration.
-
-Example:
-
-```text
-┌───────────────────────────────────────┐
-│ 🔍 Cari nama / BIB                    │
-└───────────────────────────────────────┘
-
-Budi Santoso
-BIB: 40001
-10K • Jersey L
-TRIBUN
-
-[ LIHAT DETAIL ]
+``` text
+Client
+  ↓
+Authentication check
+  ↓
+Authorization check
+  ↓
+Validasi file di server
+  ↓
+Generate storage filename
+  ↓
+Simpan file ke Hostinger storage
+  ↓
+Simpan metadata ke MySQL
+  ↓
+Response sukses
 ```
 
-Detail:
+Jika penyimpanan file berhasil tetapi insert/update MySQL gagal, sistem
+harus menangani orphan file.
 
-```text
-Budi Santoso
+Jika database berhasil mencatat file tetapi file gagal disimpan, sistem
+tidak boleh meninggalkan metadata file yang tidak valid.
 
-BIB             40001
-Kategori        10K
-Jersey          L
-Pendaftaran    TRIBUN
+------------------------------------------------------------------------
 
-Status
-BELUM DIAMBIL
+## 10. Aturan View/Download File
 
-[ AMBIL RACEPACK ]
+File tidak boleh diberikan hanya karena user mengetahui path file.
+
+Alur:
+
+``` text
+Request file
+  ↓
+Check session
+  ↓
+Check role
+  ↓
+Check akses terhadap peserta/file
+  ↓
+Read file dari storage
+  ↓
+Return file
 ```
 
-After success:
+Dokumen sensitif tidak boleh berada di:
 
-```text
-✓ RACEPACK BERHASIL DIAMBIL
-
-Budi Santoso
-BIB 40001
-
-Petugas: Andi
-Waktu: 14:32
+``` text
+/public/uploads/
 ```
 
-The success state should be visually obvious.
+------------------------------------------------------------------------
 
----
+## 11. Authentication
 
-# 22. Mobile First
+-   Gunakan session authentication yang aman.
+-   Password wajib di-hash menggunakan algoritma password hashing yang
+    aman.
+-   Password plaintext tidak boleh disimpan.
+-   Password tidak boleh dikirim kembali ke client.
+-   Session harus memiliki expiry.
+-   Logout harus menginvalidasi session.
+-   Endpoint sensitif wajib memeriksa session di server.
+-   Role harus diverifikasi di server.
+-   Role dari client bukan sumber kebenaran.
 
-The system will likely be used on:
+------------------------------------------------------------------------
 
-* smartphones
-* tablets
-* laptops
+## 12. Authorization
 
-The primary pickup screen must be mobile-first.
+Authorization wajib dilakukan pada setiap server action/API yang
+sensitif.
 
-Important:
+Client-side check hanya untuk UX.
 
-* Large touch targets
-* Large search field
-* Minimal navigation
-* Fast rendering
-* No unnecessary animations
-* Clear status
-* Easy confirmation
-* Avoid accidental double clicks
+Security boundary sebenarnya harus berada di server.
 
----
+------------------------------------------------------------------------
 
-# 23. Double Click Protection
+## 13. Aturan Database
 
-After clicking:
+Gunakan transaction untuk operasi yang membutuhkan konsistensi.
 
-```text
-AMBIL RACEPACK
+Terutama:
+
+-   Pengambilan racepack.
+-   Perubahan status pengambilan.
+-   Operasi yang mengubah beberapa tabel sekaligus.
+-   Operasi yang dapat mengalami race condition.
+
+Gunakan foreign key untuk relasi penting.
+
+Relasi utama:
+
+``` text
+users
+  │
+  └── pengambilan.petugas_id
+
+peserta
+  │
+  └── pengambilan.peserta_id
 ```
 
-disable the button while the transaction is executing.
+`pengambilan.peserta_id` harus mereferensikan peserta yang valid.
 
-Example UI state:
+------------------------------------------------------------------------
 
-```text
-[ MEMPROSES... ]
+## 14. Pencarian Peserta
+
+Jumlah peserta sekitar 1.161, sehingga pencarian harus terasa instan.
+
+Pencarian dapat menggunakan:
+
+-   BIB
+-   nama
+-   nomor HP
+-   field lain yang memang diperlukan
+
+Jangan melakukan query database pada setiap karakter input jika tidak
+diperlukan.
+
+Prioritas:
+
+``` text
+Load data yang diperlukan
+        ↓
+Cache di client
+        ↓
+Pencarian lokal
 ```
 
-Do not allow multiple simultaneous client requests from repeated clicks.
+Jika pencarian server diperlukan, gunakan query terparameterisasi dan
+index database.
 
-This is an additional UX safeguard.
+Jangan menggunakan string concatenation untuk SQL.
 
-It does NOT replace the Firestore transaction.
+------------------------------------------------------------------------
 
----
+## 15. SQL Injection
 
-# 24. Data Import
+Semua query database wajib menggunakan:
 
-Participant data originates from Excel.
+-   parameterized query;
+-   prepared statement;
+-   ORM/query builder yang aman.
 
-Before importing:
+Jangan membuat query dari concatenation input user.
 
-1. Normalize columns
-2. Validate names
-3. Validate BIB
-4. Validate phone numbers
-5. Validate NIK
-6. Preserve `pendaftaran_melalui`
-7. Detect duplicates
-8. Detect missing BIB
-9. Detect invalid BIB
-10. Review import errors
+------------------------------------------------------------------------
 
-Do not silently discard invalid records.
+## 16. Import Data Peserta
 
-Import tooling should produce a report:
+Import hanya dapat dilakukan oleh Admin.
 
-```text
-Imported
-Skipped
-Duplicate
-Invalid
-Missing required field
+Alur:
+
+``` text
+Admin upload/import file
+        ↓
+Validasi format
+        ↓
+Validasi kolom
+        ↓
+Validasi data
+        ↓
+Preview/error report
+        ↓
+Admin konfirmasi
+        ↓
+Transaction
+        ↓
+Insert/update data
 ```
 
----
+Import tidak boleh menghapus data peserta secara otomatis kecuali fitur
+tersebut secara eksplisit dibuat dan dikonfirmasi.
 
-# 25. BIB Validation
+Jangan auto-merge berdasarkan nama.
 
-Do not assume every value in a BIB column is a valid BIB.
+BIB kosong tetap boleh disimpan jika memang demikian pada sumber data.
 
-Some source sheets may contain:
+------------------------------------------------------------------------
 
-* empty values
-* names instead of BIB numbers
-* duplicated values
-* inconsistent formatting
+## 17. Audit / Histori
 
-BIB validation must be based on the actual event's BIB format.
+Operasi penting sebaiknya memiliki jejak:
 
-Do not invent validation rules without confirmation.
+-   siapa yang melakukan;
+-   kapan dilakukan;
+-   peserta terkait;
+-   tindakan;
+-   hasil tindakan.
 
----
+Minimal proses pengambilan harus mencatat:
 
-# 26. Data Integrity
-
-Participant master data and pickup transaction data should be logically separated.
-
-Participant:
-
-```text
-peserta/{id}
+``` text
+peserta_id
+petugas_id
+status
+diambil_at
 ```
 
-Pickup:
+Histori pengambilan tidak boleh hilang karena refresh halaman.
 
-```text
-pengambilan/{id}
-```
+------------------------------------------------------------------------
 
-This allows participant information to remain stable while pickup history grows independently.
+## 18. Statistik
 
----
+Dashboard statistik harus berasal dari MySQL dan tidak boleh dihitung
+dengan membaca file peserta dari storage.
 
-# 27. Error Handling
+Statistik yang dapat digunakan:
 
-Never expose raw Firebase errors to users.
+-   total peserta;
+-   total sudah diambil;
+-   total belum diambil;
+-   persentase pengambilan;
+-   pengambilan berdasarkan kategori;
+-   pengambilan berdasarkan petugas.
 
-Convert errors into clear messages.
+Optimalkan query statistik agar tidak melakukan query berulang yang
+tidak perlu.
 
-Examples:
+------------------------------------------------------------------------
 
-```text
+## 19. Performance Rules
+
+1.  Hindari query database yang tidak diperlukan.
+2.  Gunakan index pada field pencarian utama.
+3.  Hindari N+1 query.
+4.  Jangan load file peserta sebelum diperlukan.
+5.  Jangan membaca seluruh file sekaligus.
+6.  Gunakan pagination untuk daftar besar jika diperlukan.
+7.  Cache data yang aman untuk dicache.
+8.  Gunakan transaction hanya pada operasi yang membutuhkan atomicity.
+9.  Jangan melakukan realtime polling tanpa kebutuhan.
+10. Jangan mengubah page/style existing untuk alasan implementasi
+    backend.
+
+Target:
+
+> Pencarian peserta harus terasa instan dan proses pengambilan racepack
+> harus cepat, aman, dan konsisten.
+
+------------------------------------------------------------------------
+
+## 20. Error Handling
+
+Jangan mengembalikan kepada client:
+
+-   SQL query;
+-   database credential;
+-   filesystem path internal;
+-   stack trace;
+-   secret;
+-   informasi sistem internal.
+
+Gunakan pesan aman dan jelas, misalnya:
+
+``` text
 Peserta tidak ditemukan.
-
-Racepack sudah diambil.
-
-Koneksi bermasalah. Silakan coba lagi.
-
-Anda tidak memiliki izin untuk melakukan tindakan ini.
-
-Terjadi kesalahan saat menyimpan pengambilan.
 ```
 
-Log technical errors for developers/admins.
-
----
-
-# 28. Loading States
-
-Avoid full-page loading for simple operations.
-
-Use local loading indicators.
-
-For search:
-
-```text
-initial load → loading state
-search after data loaded → instant
+``` text
+Racepack peserta ini sudah diambil.
 ```
 
-For pickup:
-
-```text
-button
-  ↓
-processing
-  ↓
-success/error
+``` text
+File terlalu besar. Maksimum 5 MB.
 ```
 
-Do not reload the entire page after pickup.
-
----
-
-# 29. Next.js Guidelines
-
-Prefer modern Next.js architecture.
-
-Use Server Components by default.
-
-Use Client Components only when interactivity requires them.
-
-The participant search UI will likely be a Client Component because it requires:
-
-* local state
-* input handling
-* filtering
-* pickup interaction
-
-Do not make the entire application a Client Component unnecessarily.
-
----
-
-# 30. Firebase Client Configuration
-
-Firebase client configuration may be exposed through `NEXT_PUBLIC_*` variables because Firebase web configuration is not a secret.
-
-However:
-
-* Firestore Security Rules are mandatory.
-* Authentication must be enforced.
-* Admin SDK credentials must remain server-side.
-
-Example environment variables:
-
-```env
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-NEXT_PUBLIC_FIREBASE_APP_ID=
+``` text
+Format file tidak didukung.
 ```
 
-Never commit `.env.local`.
-
----
-
-# 31. Code Quality
-
-Use:
-
-* TypeScript strict mode
-* ESLint
-* clear component boundaries
-* reusable functions
-* typed Firestore models
-* centralized Firebase initialization
-* centralized authentication logic
-* centralized Firestore operations
-
-Avoid:
-
-* `any`
-* duplicated Firebase initialization
-* duplicated query logic
-* business logic directly inside large UI components
-* unnecessary abstractions
-* unnecessary dependencies
-
----
-
-# 32. Suggested Project Structure
-
-Recommended starting structure:
-
-```text
-src/
-├── app/
-│   ├── login/
-│   ├── dashboard/
-│   ├── peserta/
-│   ├── pengambilan/
-│   └── admin/
-│
-├── components/
-│   ├── search/
-│   ├── peserta/
-│   ├── pengambilan/
-│   ├── dashboard/
-│   └── ui/
-│
-├── lib/
-│   ├── firebase/
-│   │   ├── client.ts
-│   │   ├── auth.ts
-│   │   └── firestore.ts
-│   │
-│   ├── peserta/
-│   ├── pengambilan/
-│   └── stats/
-│
-├── hooks/
-├── types/
-├── utils/
-└── constants/
+``` text
+Anda tidak memiliki akses untuk melakukan tindakan ini.
 ```
 
-Adjust the structure when the project grows, but avoid premature complexity.
+------------------------------------------------------------------------
 
----
+# 21. Alur Bisnis Utama
 
-# 33. Performance Budget
+## A. Login
 
-Primary pickup page should be treated as a performance-critical page.
-
-Priorities:
-
-1. Fast initial render
-2. Fast search
-3. Minimal JavaScript
-4. Minimal network requests
-5. No unnecessary realtime subscriptions
-6. No unnecessary Firebase reads
-7. No unnecessary component rendering
-
-Search interaction should feel effectively instantaneous for ~1,166 participants.
-
----
-
-# 34. Firestore Cost Optimization
-
-Always consider read/write cost.
-
-Bad:
-
-```text
-User types "budi"
-→ 4 Firestore queries
+``` text
+User membuka aplikasi
+        ↓
+Login
+        ↓
+Validasi credential
+        ↓
+Buat session
+        ↓
+Baca role
+        ↓
+Masuk ke halaman sesuai hak akses
 ```
 
-Good:
+## B. Cari Peserta
 
-```text
-Load/cache participant data once
-→ local search
+``` text
+Petugas/Admin login
+        ↓
+Buka pencarian peserta
+        ↓
+Masukkan BIB/Nama/No HP
+        ↓
+Sistem mencari peserta
+        ↓
+Tampilkan hasil
+        ↓
+User memilih peserta
+        ↓
+Tampilkan detail peserta
 ```
 
-Bad:
+## C. Verifikasi Dokumen
 
-```text
-Dashboard
-→ read all participants
-→ calculate counts
+``` text
+Buka detail peserta
+        ↓
+Lihat status bukti pembayaran
+        ↓
+Jika tersedia:
+    lihat bukti pembayaran
+        ↓
+Jika peserta diwakilkan:
+    lihat surat kuasa
+        ↓
+Lanjut proses racepack
 ```
 
-Good:
+## D. Pengambilan Racepack
 
-```text
-Dashboard
-→ read stats document
+``` text
+Petugas memilih peserta
+        ↓
+Sistem menampilkan detail
+        ↓
+Petugas melakukan verifikasi
+        ↓
+Klik "Ambil Racepack"
+        ↓
+Server memulai transaction
+        ↓
+Cek status terbaru
+        ↓
+Belum diambil?
+   ├── Tidak → tampilkan "Sudah diambil"
+   │
+   └── Ya
+        ↓
+Catat pengambilan
+        ↓
+Catat petugas
+        ↓
+Catat waktu server
+        ↓
+Commit
+        ↓
+Tampilkan berhasil
 ```
 
-Bad:
+## E. Peserta Sudah Diambil
 
-```text
-Every component subscribes to Firestore
+``` text
+Cari peserta
+    ↓
+Detail
+    ↓
+Status = SUDAH DIAMBIL
+    ↓
+Tampilkan waktu pengambilan
+    ↓
+Tampilkan petugas
+    ↓
+Tidak boleh membuat pengambilan kedua
 ```
 
-Good:
+Petugas biasa tidak boleh menghapus atau mengubah histori tersebut.
 
-```text
-Use Firestore only where realtime synchronization is actually needed.
+## F. Peserta Diwakilkan
+
+``` text
+Cari peserta
+    ↓
+Verifikasi identitas/data peserta
+    ↓
+Periksa surat kuasa
+    ↓
+Jika surat kuasa valid:
+    lanjut pengambilan
+    ↓
+Catat pengambilan seperti biasa
 ```
 
----
+Surat kuasa harus tersedia atau diverifikasi sesuai aturan operasional
+event sebelum racepack diberikan.
 
-# 35. Business Rules
+------------------------------------------------------------------------
 
-The following rules are mandatory:
+# 22. Larangan Perubahan UI
 
-### Rule 1
+Agent/developer **tidak boleh**:
 
-A participant can only have one successful racepack pickup.
+-   mengganti warna;
+-   mengganti font;
+-   mengganti layout;
+-   mengganti komponen visual;
+-   membuat design system baru;
+-   mengubah page yang sudah tersedia;
+-   menambahkan animasi berlebihan;
+-   mengubah style hanya karena backend menggunakan teknologi berbeda.
 
-### Rule 2
+Style dan page existing adalah **source of truth untuk tampilan
+aplikasi**.
 
-Two staff members must not be able to successfully claim the same participant simultaneously.
+Jika implementasi backend membutuhkan perubahan kecil pada page,
+pertahankan struktur dan style existing semaksimal mungkin.
 
-### Rule 3
+------------------------------------------------------------------------
 
-Pickup time must use server-side time.
+# 23. Prioritas Pengembangan
 
-### Rule 4
+Urutan prioritas:
 
-The staff member performing the pickup must be recorded.
+1.  Keamanan
+2.  Konsistensi data
+3.  Correctness alur bisnis
+4.  Performance
+5.  Reliability
+6.  Maintainability
+7.  UI existing tetap dipertahankan
 
-### Rule 5
+Jika ada konflik antara kecepatan implementasi dan keamanan/data
+consistency, pilih keamanan dan consistency.
 
-Participant master data must not be accidentally modified during pickup.
+------------------------------------------------------------------------
 
-### Rule 6
+# 24. Definition of Done
 
-Duplicate participant names must not automatically be merged.
+Fitur dianggap selesai apabila:
 
-### Rule 7
-
-Missing or invalid BIB must not cause participant records to disappear.
-
----
-
-# 36. Development Order
-
-Implement in this order:
-
-## Phase 1 — Foundation
-
-* Create Next.js project
-* Configure TypeScript
-* Configure Tailwind
-* Configure Firebase
-* Configure environment variables
-* Configure Firebase Authentication
-* Configure Firestore
-
-## Phase 2 — Data
-
-* Define participant types
-* Define Firestore schema
-* Prepare import process
-* Import normalized participant data
-* Validate imported records
-
-## Phase 3 — Authentication
-
-* Login
-* Logout
-* Staff roles
-* Protected routes
-
-## Phase 4 — Search
-
-* Load/cache participants
-* Local search
-* Search by name
-* Search by BIB
-* Search by NIK/phone where appropriate
-* Fast result rendering
-
-## Phase 5 — Pickup
-
-* Participant detail
-* Pickup button
-* Transaction
-* Race-condition protection
-* Server timestamp
-* Staff ID
-* Success/error states
-
-## Phase 6 — Dashboard
-
-* Total participants
-* Picked up
-* Not picked up
-* Percentage
-* Staff statistics if required
-
-## Phase 7 — Audit
-
-* Pickup history
-* Staff activity
-* Duplicate pickup attempts
-* Administrative correction tools
-
-## Phase 8 — Deployment
-
-* Production Firebase project
-* Firestore Security Rules
-* Firebase Auth configuration
-* Vercel environment variables
-* Production deployment
-* Performance testing
-
----
-
-# 37. Testing Requirements
-
-Before production, test:
-
-### Search
-
-* Exact name
-* Partial name
-* Uppercase/lowercase
-* Names with extra spaces
-* Duplicate names
-* Missing BIB
-* Invalid BIB
-
-### Pickup
-
-* Normal pickup
-* Double click
-* Two users simultaneously
-* Already picked participant
-* Network failure
-* Authentication failure
-* Firestore permission failure
-
-### Dashboard
-
-* Correct total
-* Correct picked count
-* Correct remaining count
-* Correct percentage
-
-### Security
-
-* Unauthenticated access
-* Petugas permissions
-* Admin permissions
-* Unauthorized Firestore writes
-* Unauthorized participant modifications
-
----
-
-# 38. Deployment
-
-The production application will be deployed on Vercel.
-
-The application must be compatible with Vercel's deployment model.
-
-Avoid architecture that requires:
-
-* persistent local filesystem
-* long-running background processes
-* manually maintained servers
-
-Use Firebase for persistent data.
-
----
-
-# 39. Important Agent Behavior
-
-When modifying this project, the coding agent must:
-
-1. Read this `AGENTS.md` before making architectural changes.
-2. Preserve the Firebase + Next.js architecture.
-3. Prioritize performance.
-4. Minimize Firestore reads.
-5. Minimize Firestore writes.
-6. Protect pickup operations with atomic consistency.
-7. Never weaken Firestore security rules merely to make development easier.
-8. Never expose server credentials.
-9. Avoid unnecessary dependencies.
-10. Avoid unnecessary rewrites.
-11. Keep changes focused and explain significant architectural changes.
-12. Test critical pickup behavior after modifying it.
-
----
-
-# 40. Definition of Done
-
-The system is considered production-ready when:
-
-* Staff can securely log in.
-* Participant search is fast.
-* Search does not query Firestore on every keystroke.
-* Participant data is correctly imported.
-* Registration source is preserved.
-* Duplicate names are handled safely.
-* BIB inconsistencies are handled safely.
-* Racepack pickup is atomic.
-* Double pickup is prevented.
-* Pickup time uses server time.
-* Staff identity is recorded.
-* Dashboard statistics are efficient.
-* Firestore rules protect the database.
-* Mobile UI works well.
-* Vercel deployment works.
-* Production environment variables are configured.
-* Critical flows have been tested.
-
----
-
-# 41. Primary Principle
-
-The most important principle of this project is:
-
-> **Make the racepack pickup process extremely fast for staff without sacrificing data integrity or security.**
-
-The ideal user experience is:
-
-```text
-OPEN WEBSITE
-     ↓
-LOGIN
-     ↓
-TYPE NAME / BIB
-     ↓
-RESULT APPEARS IMMEDIATELY
-     ↓
-VERIFY PARTICIPANT
-     ↓
-AMBIL RACEPACK
-     ↓
-SUCCESS
-```
-
-The entire workflow should be optimized for real-world event conditions, multiple simultaneous staff users, unreliable network conditions, and minimal Firebase usage.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+-   Authorization server-side benar.
+-   Input divalidasi.
+-   Query aman dari SQL injection.
+-   Transaction digunakan bila diperlukan.
+-   Tidak ada credential/secret di client.
+-   File sensitif tidak public.
+-   Error handling aman.
+-   Tidak ada duplicate pengambilan.
+-   Tidak merusak data existing.
+-   Tidak mengubah style/page existing tanpa kebutuhan eksplisit.
+-   Fitur berjalan di environment Hostinger.

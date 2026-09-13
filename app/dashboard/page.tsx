@@ -1,10 +1,8 @@
 "use client";
 
 import React, { useEffect, useState, useTransition } from "react";
-import { getRacepackStats } from "@/lib/services/statsService";
+import { getDetailedStats, CategoryStatItem } from "@/lib/services/statsService";
 import { RacepackStats } from "@/types/stats";
-import { Peserta } from "@/types/peserta";
-import { usePesertaSearch } from "@/hooks/usePesertaSearch";
 import {
   BarChart3,
   CheckCircle2,
@@ -20,18 +18,19 @@ import AuthGuard from "@/components/auth/AuthGuard";
 
 function DashboardContent() {
   const [stats, setStats] = useState<RacepackStats | null>(null);
+  const [categories, setCategories] = useState<CategoryStatItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
-
-  // Read category breakdown locally from in-memory cache (0 cost!)
-  const { allPeserta } = usePesertaSearch();
 
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const res = await getRacepackStats(1161);
+      const res = await getDetailedStats();
       startTransition(() => {
-        setStats(res);
+        setStats(res.stats);
+        if (res.categories && res.categories.length > 0) {
+          setCategories(res.categories);
+        }
       });
     } catch (e) {
       console.error("Dashboard stats error:", e);
@@ -49,23 +48,6 @@ function DashboardContent() {
   const belum = stats?.belum_diambil || Math.max(0, total - sudah);
   const percentage = total > 0 ? Math.round((sudah / total) * 100) : 0;
 
-  // Breakdown by Category computed locally from in-memory cache
-  const categoryStats = React.useMemo(() => {
-    const map = new Map<string, { total: number; sudah: number }>();
-    allPeserta.forEach((p: Peserta) => {
-      const cat = p.kategori || "Umum";
-      const current = map.get(cat) || { total: 0, sudah: 0 };
-      current.total++;
-      if (p.status_pengambilan) current.sudah++;
-      map.set(cat, current);
-    });
-    return Array.from(map.entries()).map(([kategori, val]) => ({
-      kategori,
-      ...val,
-      pct: val.total > 0 ? Math.round((val.sudah / val.total) * 100) : 0,
-    }));
-  }, [allPeserta]);
-
   return (
     <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-6 sm:py-8 space-y-6">
       {/* Top Header */}
@@ -80,7 +62,7 @@ function DashboardContent() {
                 DASHBOARD STATISTIK RACEPACK
               </h1>
               <p className="text-[11px] font-bold text-[#26734D] italic mt-0.5">
-                RUN IDI RUN 5K 2026 • Monitoring Kuota Pengambilan (1 Dokumen Read)
+                RUN IDI RUN 5K 2026 • Monitoring Real-time Kuota Pengambilan MySQL
               </p>
             </div>
           </div>
@@ -166,7 +148,7 @@ function DashboardContent() {
       </section>
 
       {/* Category Breakdown */}
-      {categoryStats.length > 0 && (
+      {categories.length > 0 && (
         <section className="p-6 rounded-xl bg-[#FAF5EA] border border-[#D8CDB8] shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-lg uppercase text-[#111111] flex items-center gap-2">
@@ -174,12 +156,12 @@ function DashboardContent() {
               <span>Rincian Pengambilan Berdasarkan Kategori</span>
             </h2>
             <span className="text-[10px] font-bold text-[#26734D] bg-[#26734D]/10 px-2.5 py-0.5 rounded border border-[#26734D]/30">
-              Lokal In-Memory • 0 Read
+              MySQL Real-time
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {categoryStats.map((cat) => (
+            {categories.map((cat) => (
               <div
                 key={cat.kategori}
                 className="p-4 rounded-lg bg-[#F3E8D2] border border-[#D8CDB8] space-y-2.5"

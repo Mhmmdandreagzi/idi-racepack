@@ -1,5 +1,15 @@
 [
   {
+    "uid": "superadmin_01",
+    "email": "superadmin@racepack.com",
+    "password": "superadmin123",
+    "displayName": "Super Admin IDI",
+    "nama": "Super Admin IDI",
+    "role": "superadmin",
+    "isActive": true,
+    "aktif": true
+  },
+  {
     "uid": "admin_01",
     "email": "admin@racepack.com",
     "password": "admin123",

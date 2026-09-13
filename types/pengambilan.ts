@@ -1,6 +1,6 @@
 export interface PengambilanLog {
   id: string;
-  peserta_id: string;
+  peserta_id?: string;
   peserta_nama: string;
   peserta_bib: string;
   peserta_kategori: string;
@@ -8,8 +8,8 @@ export interface PengambilanLog {
   petugas_id: string;
   petugas_nama: string;
   petugas_email: string;
-  waktu_pengambilan: string; // ISO string or Firestore Timestamp representation
-  status: "BERHASIL" | "DIBATALKAN";
+  waktu_pengambilan: string; // ISO string or DB timestamp representation
+  status: "BERHASIL" | "DIBATALKAN" | "RESET_MASSAL";
   keterangan?: string;
   is_kolektif?: boolean;
   diambil_oleh?: string;

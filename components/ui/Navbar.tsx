@@ -9,16 +9,24 @@ import {
   History,
   LogOut,
   User,
+  Shield,
 } from "lucide-react";
 
 export default function Navbar() {
   const pathname = usePathname();
   const { user, role, logout } = useAuth();
 
+  const isAdminOrSuper = role === "admin" || role === "superadmin";
+
   const navItems = user
     ? [
         { label: "Ambil Racepack", href: "/peserta", icon: PackageCheck },
-        ...(role === "admin" ? [{ label: "Dashboard", href: "/dashboard", icon: BarChart3 }] : []),
+        ...(isAdminOrSuper
+          ? [
+              { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
+              { label: "Admin", href: "/admin", icon: Shield },
+            ]
+          : []),
         { label: "Riwayat", href: "/pengambilan", icon: History },
       ]
     : [];

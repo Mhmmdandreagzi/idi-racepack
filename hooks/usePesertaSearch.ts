@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Peserta } from "@/types/peserta";
-import { queryPesertaFromFirestore } from "@/lib/services/pesertaQueryService";
+import { queryPeserta } from "@/lib/services/pesertaQueryService";
 import { KategoriPeserta, SumberDaftar } from "@/types/peserta";
 import { KATEGORI_OPTIONS, SUMBER_PENDAFTARAN_OPTIONS } from "@/constants/peserta";
 
@@ -20,37 +20,32 @@ export function usePesertaSearch() {
     kategori: "all",
     sumber: "all",
   });
-  const [hasSearched, setHasSearched] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Execute on-demand search directly to Firestore
+  // Execute search using cached dataset & MySQL
+  // Boleh kosong: jika kosong akan menampilkan semua peserta yang cocok dengan filter
   const executeSearch = useCallback(
     async (overrideQuery?: string, overrideFilters?: SearchFilters) => {
       const q = (overrideQuery !== undefined ? overrideQuery : searchQuery).trim();
       const f = overrideFilters !== undefined ? overrideFilters : filters;
 
-      // Jika input pencarian kosong, JANGAN lakukan get data ke Firestore
-      if (!q) {
-        setError("Harap masukkan kata kunci pencarian (Nama, No BIB, NIK, atau No HP).");
-        return;
-      }
-
       try {
         setIsLoading(true);
         setError(null);
-        setHasSearched(true);
 
-        const data = await queryPesertaFromFirestore({
+        const data = await queryPeserta({
           searchQuery: q,
           filters: f,
         });
 
         setResults(data);
+        setHasSearched(true);
       } catch (err: any) {
-        console.error("Failed querying peserta from Firestore:", err);
+        console.error("Failed querying peserta:", err);
         setError(
-          err.message || "Gagal mengambil data dari Firestore. Periksa koneksi dan izin Anda."
+          err.message || "Gagal mengambil data peserta. Periksa koneksi database Anda."
         );
         setResults([]);
       } finally {
@@ -60,6 +55,11 @@ export function usePesertaSearch() {
     [searchQuery, filters]
   );
 
+  // Load data immediately on first mount
+  useEffect(() => {
+    executeSearch("", { status: "belum", kategori: "all", sumber: "all" });
+  }, []);
+
   // Update participant locally (e.g. after pickup confirmation)
   const updateLocalPeserta = useCallback((id: string, updates: Partial<Peserta>) => {
     setResults((prev) =>
@@ -67,13 +67,25 @@ export function usePesertaSearch() {
     );
   }, []);
 
+  const handleSetFilters = useCallback(
+    (newFilters: SearchFilters | ((prev: SearchFilters) => SearchFilters)) => {
+      setFilters((prev) => {
+        const next = typeof newFilters === "function" ? newFilters(prev) : newFilters;
+        // Auto search with new filters
+        executeSearch(searchQuery, next);
+        return next;
+      });
+    },
+    [searchQuery, executeSearch]
+  );
+
   const resetSearch = useCallback(() => {
     setSearchQuery("");
-    setFilters({ status: "belum", kategori: "all", sumber: "all" });
-    setResults([]);
-    setHasSearched(false);
+    const initialF: SearchFilters = { status: "belum", kategori: "all", sumber: "all" };
+    setFilters(initialF);
     setError(null);
-  }, []);
+    executeSearch("", initialF);
+  }, [executeSearch]);
 
   return {
     allPeserta: results,
@@ -82,7 +94,7 @@ export function usePesertaSearch() {
     searchQuery,
     setSearchQuery,
     filters,
-    setFilters,
+    setFilters: handleSetFilters,
     hasSearched,
     isLoading,
     error,

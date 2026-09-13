@@ -1,9 +1,7 @@
 import { Peserta, normalizeSearchString } from "@/types/peserta";
-import { isFirebaseConfigured, db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
 
-const CACHE_KEY = "idi_racepack_peserta_cache_v1";
-const CACHE_TIMESTAMP_KEY = "idi_racepack_peserta_cache_time";
+const CACHE_KEY = "idi_racepack_peserta_cache_v3";
+const CACHE_TIMESTAMP_KEY = "idi_racepack_peserta_cache_time_v3";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 4; // 4 hours
 
 let inMemoryPeserta: Peserta[] | null = null;
@@ -34,25 +32,28 @@ export async function loadPesertaDataset(forceRefresh = false): Promise<Peserta[
     }
   }
 
-  // 3. Fetch from source: Strictly Cloud Firestore when Firebase is configured
+  // 3. Fetch from source: MySQL API /api/peserta
   let participants: Peserta[] = [];
 
-  if (isFirebaseConfigured && db) {
-    try {
-      const snapshot = await getDocs(collection(db, "peserta"));
-      snapshot.forEach((docSnap) => {
-        participants.push({
-          id: docSnap.id,
-          ...(docSnap.data() as Omit<Peserta, "id">),
-        });
-      });
-      console.log(`[pesertaCache] Loaded ${participants.length} peserta directly from Cloud Firestore.`);
-    } catch (err: any) {
-      console.error("[pesertaCache] Firestore fetch error:", err);
-      throw new Error("Gagal mengambil data peserta dari Cloud Firestore: " + (err.message || "Periksa koneksi atau izin database."));
+  try {
+    const res = await fetch("/api/peserta", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || "Gagal memuat data peserta dari server.");
     }
-  } else {
-    throw new Error("Cloud Firestore belum dikonfigurasi. Harap periksa file .env.local.");
+
+    const json = await res.json();
+    participants = json.data || [];
+  } catch (err: any) {
+    console.error("[pesertaCache] MySQL fetch error:", err);
+    throw new Error(
+      "Gagal mengambil data peserta dari MySQL: " +
+        (err.message || "Periksa koneksi database Anda.")
+    );
   }
 
   // Ensure nama_search is populated on every record
