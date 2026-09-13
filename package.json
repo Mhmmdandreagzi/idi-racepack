@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/init-db.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:init": "node scripts/init-db.mjs"
+    "db:init": "node scripts/init-db.mjs",
+    "db:init:force": "node scripts/init-db.mjs --force"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

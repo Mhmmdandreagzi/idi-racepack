@@ -14,18 +14,21 @@ function normalizeSearchString(val) {
   return val.toString().toLowerCase().trim().replace(/\s+/g, " ");
 }
 
-// Load .env.local manually if running in Node script
+// Load environment variables from .env.production, .env.local, or .env
 function loadEnv() {
-  const envPath = path.join(rootDir, ".env.local");
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
-        const [key, ...valParts] = trimmed.split("=");
-        const val = valParts.join("=").trim().replace(/^["']|["']$/g, "");
-        if (!process.env[key.trim()]) {
-          process.env[key.trim()] = val;
+  const envCandidates = [".env.production", ".env.local", ".env"];
+  for (const file of envCandidates) {
+    const envPath = path.join(rootDir, file);
+    if (fs.existsSync(envPath)) {
+      const lines = fs.readFileSync(envPath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+          const [key, ...valParts] = trimmed.split("=");
+          const val = valParts.join("=").trim().replace(/^["']|["']$/g, "");
+          if (!process.env[key.trim()]) {
+            process.env[key.trim()] = val;
+          }
         }
       }
     }
@@ -39,12 +42,12 @@ const dbPort = Number(process.env.DB_PORT) || 3306;
 const dbUser = process.env.DB_USER || "root";
 const dbPassword = process.env.DB_PASSWORD || "";
 const dbName = process.env.DB_NAME || "idi_racepack";
+const isForce = process.argv.includes("--force");
 
 async function main() {
   console.log("====================================================");
-  console.log("🚀 RUN IDI RUN - Inisialisasi Database MySQL (Semua Kolom Excel)");
+  console.log("🚀 RUN IDI RUN - Inisialisasi Database MySQL");
   console.log("====================================================");
-  console.log(`📡 Menghubungkan ke MySQL ${dbUser}@${dbHost}:${dbPort}...`);
 
   let connection;
   try {
@@ -56,12 +59,52 @@ async function main() {
       multipleStatements: true,
     });
   } catch (err) {
-    console.error("❌ Gagal terhubung ke MySQL server:", err.message);
-    process.exit(1);
+    console.warn(`⚠️ [db:init] Tidak dapat terhubung ke MySQL (${err.message}).`);
+    console.warn("ℹ️ Melewati auto-inisialisasi database saat build.");
+    console.warn("💡 Jika database sudah aktif, Anda dapat menjalankannya manual via: npm run db:init\n");
+    return; // Exit cleanly without breaking build
   }
 
   try {
-    // 1. Create database
+    // 0. Cek apakah database dan tabel sudah pernah dibuat sebelumnya
+    if (!isForce) {
+      try {
+        const [dbCheck] = await connection.query(
+          "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?",
+          [dbName]
+        );
+
+        if (dbCheck.length > 0) {
+          await connection.changeUser({ database: dbName });
+
+          const [tableCheck] = await connection.query(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('peserta', 'users')",
+            [dbName]
+          );
+
+          const foundTables = tableCheck.map((t) => t.TABLE_NAME);
+          if (foundTables.includes("peserta") && foundTables.includes("users")) {
+            const [pCount] = await connection.query("SELECT COUNT(*) as cnt FROM peserta");
+            const [uCount] = await connection.query("SELECT COUNT(*) as cnt FROM users");
+            const totalPeserta = Number(pCount[0]?.cnt || 0);
+            const totalUsers = Number(uCount[0]?.cnt || 0);
+
+            if (totalPeserta > 0 && totalUsers > 0) {
+              console.log(`✓ Database '${dbName}' sudah terinisialisasi.`);
+              console.log(`✓ Ditemukan ${totalPeserta} data peserta dan ${totalUsers} akun pengguna.`);
+              console.log("✓ Inisialisasi dilewati karena data sudah ada.");
+              console.log("💡 (Gunakan 'npm run db:init:force' jika ingin memaksa inisialisasi ulang)");
+              console.log("====================================================\n");
+              return;
+            }
+          }
+        }
+      } catch (checkErr) {
+        // Jika cek gagal, lanjutkan inisialisasi normal
+      }
+    }
+
+    // 1. Create database jika belum ada
     console.log(`📁 Menyiapkan database \`${dbName}\`...`);
     await connection.query(
       `CREATE DATABASE IF NOT EXISTS \`${dbName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
